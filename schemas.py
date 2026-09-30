@@ -200,6 +200,68 @@ class DriftReportResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+AlertType = Literal["FRAUD_DETECTED", "MODEL_DRIFT"]
+AlertSeverity = Literal["critical", "high", "medium"]
+
+
+class AlertCreate(BaseModel):
+    alert_type: AlertType
+    severity: AlertSeverity
+    message: str = Field(min_length=1, max_length=500)
+    dedupe_key: str = Field(min_length=1, max_length=64)
+    transaction_id: Optional[int] = Field(default=None, gt=0)
+    model_id: Optional[str] = Field(default=None, min_length=1, max_length=50)
+    fraud_probability: Optional[float] = Field(default=None, ge=0, le=1, allow_inf_nan=False)
+    feature_name: Optional[str] = Field(default=None, min_length=1, max_length=50)
+    drift_score: Optional[float] = Field(default=None, ge=0, le=9999999999999.99, allow_inf_nan=False)
+    drift_status: Optional[Literal["warning", "drift_detected"]] = None
+    source_prediction_id: Optional[int] = Field(default=None, gt=0)
+    source_drift_report_id: Optional[int] = Field(default=None, gt=0)
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    @model_validator(mode="after")
+    def validate_event_fields(self):
+        if self.alert_type == "FRAUD_DETECTED":
+            required = (
+                self.transaction_id,
+                self.model_id,
+                self.fraud_probability,
+                self.source_prediction_id,
+            )
+        else:
+            required = (
+                self.model_id,
+                self.feature_name,
+                self.drift_score,
+                self.drift_status,
+                self.source_drift_report_id,
+            )
+        if any(value is None for value in required):
+            raise ValueError("Required fields are missing for this alert type")
+        return self
+
+
+class AlertResponse(BaseModel):
+    alert_id: int
+    alert_type: AlertType
+    type: AlertType = Field(validation_alias="alert_type")
+    severity: AlertSeverity
+    message: str
+    transaction_id: Optional[int] = None
+    model_id: Optional[str] = None
+    fraud_probability: Optional[float] = None
+    fraud_score: Optional[float] = Field(default=None, validation_alias="fraud_probability")
+    feature_name: Optional[str] = None
+    drift_score: Optional[float] = None
+    drift_status: Optional[str] = None
+    prediction_id: Optional[int] = Field(default=None, validation_alias="source_prediction_id")
+    drift_report_id: Optional[int] = Field(default=None, validation_alias="source_drift_report_id")
+    timestamp: datetime = Field(validation_alias="created_at")
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class ModelComparisonResponse(BaseModel):
     model_id: str
     model_name: Optional[str]
@@ -214,3 +276,29 @@ class ModelComparisonResponse(BaseModel):
     training_time_sec: Optional[float] = None
     confusion_matrix: Optional[list[list[int]]] = None
     roc_points: list[dict[str, float]] = Field(default_factory=list)
+
+
+class RetrainRequest(BaseModel):
+    source_model_id: str = Field(min_length=1, max_length=50)
+    sample_non_fraud: int = Field(default=80000, ge=100, le=250000)
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+
+class RetrainResponse(BaseModel):
+    model_id: str
+    source_model_id: str
+    model_name: str
+    model_type: str
+    version: int
+    training_status: Literal["completed"]
+    model_status: str
+    model_accuracy: float
+    model_precision: float
+    model_recall: float
+    model_f1_score: float
+    model_roc_auc: float
+    training_time_sec: float
+    threshold: float
+    artifact_path: str
+    model_training_time: datetime

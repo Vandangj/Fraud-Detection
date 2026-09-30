@@ -1,10 +1,16 @@
 from datetime import datetime
+import hashlib
+import json
+import logging
 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 import database_models as models
 import schemas
+
+
+logger = logging.getLogger(__name__)
 
 
 # users
@@ -383,3 +389,134 @@ def delete_drift_report(
     _commit_drift_report(db)
 
     return report
+
+
+# alerts
+
+def create_alert(db: Session, alert: schemas.AlertCreate):
+    existing = db.query(models.Alert).filter(
+        models.Alert.dedupe_key == alert.dedupe_key
+    ).first()
+    if existing:
+        return existing
+
+    db_alert = models.Alert(
+        alert_type=alert.alert_type,
+        severity=alert.severity,
+        message=alert.message,
+        transaction_id=alert.transaction_id,
+        model_id=alert.model_id,
+        fraud_probability=alert.fraud_probability,
+        feature_name=alert.feature_name,
+        drift_score=alert.drift_score,
+        drift_status=alert.drift_status,
+        source_prediction_id=alert.source_prediction_id,
+        source_drift_report_id=alert.source_drift_report_id,
+        dedupe_key=alert.dedupe_key,
+        created_at=datetime.now(),
+    )
+    db.add(db_alert)
+    try:
+        db.commit()
+        db.refresh(db_alert)
+        return db_alert
+    except SQLAlchemyError:
+        db.rollback()
+        existing = db.query(models.Alert).filter(
+            models.Alert.dedupe_key == alert.dedupe_key
+        ).first()
+        if existing:
+            return existing
+        raise
+
+
+def create_alert_best_effort(db: Session, alert: schemas.AlertCreate):
+    try:
+        return create_alert(db, alert)
+    except Exception:
+        db.rollback()
+        logger.exception("Could not persist alert event %s", alert.alert_type)
+        return None
+
+
+def create_fraud_alert(db: Session, prediction, fraud_probability: float):
+    probability = float(fraud_probability)
+    dedupe_key = hashlib.sha256(
+        f"FRAUD_DETECTED:{prediction.prediction_id}".encode("utf-8")
+    ).hexdigest()
+    alert = schemas.AlertCreate(
+        alert_type="FRAUD_DETECTED",
+        severity="critical" if probability >= 0.90 else "high",
+        message=(
+            f"Transaction {prediction.transaction_id} was classified as fraudulent "
+            f"by {prediction.model_id} with {probability:.2%} probability."
+        ),
+        dedupe_key=dedupe_key,
+        transaction_id=prediction.transaction_id,
+        model_id=prediction.model_id,
+        fraud_probability=probability,
+        source_prediction_id=prediction.prediction_id,
+    )
+    return create_alert_best_effort(db, alert)
+
+
+def create_drift_alert(db: Session, report):
+    drift_score = float(report.drift_score)
+    window_end_transaction_id = (
+        db.query(models.Transaction.transaction_id)
+        .order_by(models.Transaction.transaction_id.desc())
+        .limit(1)
+        .scalar()
+    )
+    signature = json.dumps(
+        [
+            report.model_id,
+            report.feature_name,
+            drift_score,
+            report.drift_status,
+            window_end_transaction_id,
+        ],
+        separators=(",", ":"),
+    )
+    dedupe_key = hashlib.sha256(f"MODEL_DRIFT:{signature}".encode("utf-8")).hexdigest()
+    alert = schemas.AlertCreate(
+        alert_type="MODEL_DRIFT",
+        severity="medium" if report.drift_status == "warning" else "high",
+        message=(
+            f"Model {report.model_id} has {report.drift_status.replace('_', ' ')} "
+            f"on feature '{report.feature_name}' (PSI={drift_score:.2f})."
+        ),
+        dedupe_key=dedupe_key,
+        model_id=report.model_id,
+        feature_name=report.feature_name,
+        drift_score=drift_score,
+        drift_status=report.drift_status,
+        source_drift_report_id=report.report_id,
+    )
+    return create_alert_best_effort(db, alert)
+
+
+def get_alerts(
+    db: Session,
+    skip: int = 0,
+    limit: int = 100,
+    alert_type: str = None,
+    severity: str = None,
+    model_id: str = None,
+    transaction_id: int = None,
+):
+    query = db.query(models.Alert)
+    if alert_type is not None:
+        query = query.filter(models.Alert.alert_type == alert_type)
+    if severity is not None:
+        query = query.filter(models.Alert.severity == severity)
+    if model_id is not None:
+        query = query.filter(models.Alert.model_id == model_id)
+    if transaction_id is not None:
+        query = query.filter(models.Alert.transaction_id == transaction_id)
+    return (
+        query.order_by(models.Alert.created_at.desc(), models.Alert.alert_id.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )

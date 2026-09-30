@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Numeric, Boolean
+from sqlalchemy import Column, Integer, String, DateTime, Numeric, Boolean, UniqueConstraint
 from sqlalchemy import ForeignKey
 from database import Base
 
@@ -78,5 +78,35 @@ class drift_reports(Base):
     report_time = Column(DateTime)
 
 
+class Alert(Base):
+    __tablename__ = "alerts"
+    __table_args__ = (
+        UniqueConstraint("dedupe_key", name="uq_alerts_dedupe_key"),
+        UniqueConstraint("source_prediction_id", name="uq_alerts_source_prediction"),
+        UniqueConstraint("source_drift_report_id", name="uq_alerts_source_drift_report"),
+    )
+
+    alert_id = Column(Integer, primary_key=True, index=True)
+    alert_type = Column(String(32), nullable=False, index=True)
+    severity = Column(String(20), nullable=False)
+    message = Column(String(500), nullable=False)
+    transaction_id = Column(Integer, ForeignKey("transactions.transaction_id"), index=True)
+    model_id = Column(String(50), ForeignKey("models.model_id"), index=True)
+    fraud_probability = Column(Numeric(8, 6))
+    feature_name = Column(String(50))
+    drift_score = Column(Numeric(15, 6))
+    drift_status = Column(String(50))
+    source_prediction_id = Column(
+        Integer,
+        ForeignKey("frauds.prediction_id", ondelete="CASCADE"),
+    )
+    source_drift_report_id = Column(
+        Integer,
+        ForeignKey("drift_reports.report_id", ondelete="CASCADE"),
+    )
+    dedupe_key = Column(String(64), nullable=False)
+    created_at = Column(DateTime, nullable=False, index=True)
+
+
 DriftReport = drift_reports
-FraudPrediction = Fraud_prediction
+FraudPrediction = Fraud_prediction

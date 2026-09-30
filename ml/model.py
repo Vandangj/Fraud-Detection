@@ -1,6 +1,8 @@
 import os
 import json
+import re
 import joblib
+from pathlib import Path
 
 os.makedirs("models", exist_ok=True)
 
@@ -8,6 +10,10 @@ MODEL_PATH = "models/model.pkl"
 FEATURES_PATH = "models/features.pkl"
 THRESHOLD_PATH = "models/threshold.pkl"
 METRICS_PATH = "models/metrics_comparison.json"
+RETRAINED_MODELS_DIR = Path(__file__).resolve().parents[1] / "models" / "retrained"
+RETRAINED_MODEL_ID = re.compile(
+    r"(?:rf-balanced|xgb-boosted|lgb-fast|gb-ensemble|lr-baseline)-v[1-9][0-9]*"
+)
 
 # Load primary baseline for backward compatibility
 try:
@@ -46,7 +52,11 @@ def get_model(model_id: str = "rf-balanced-v1"):
         return _loaded_models[model_id]
 
     file_path = MODEL_FILES.get(model_id)
+    if file_path is None and RETRAINED_MODEL_ID.fullmatch(model_id):
+        file_path = str(RETRAINED_MODELS_DIR / f"{model_id}.pkl")
     if not file_path or not os.path.exists(file_path):
+        if RETRAINED_MODEL_ID.fullmatch(model_id):
+            return None
         # Fall back to default primary model
         return model
 
@@ -65,6 +75,12 @@ def get_available_models():
     for m_id, fpath in MODEL_FILES.items():
         if os.path.exists(fpath):
             available.append(m_id)
+    if RETRAINED_MODELS_DIR.exists():
+        available.extend(
+            path.stem
+            for path in RETRAINED_MODELS_DIR.glob("*.pkl")
+            if RETRAINED_MODEL_ID.fullmatch(path.stem)
+        )
     if not available and model is not None:
         available.append("rf-balanced-v1")
     return available

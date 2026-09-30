@@ -124,6 +124,9 @@ def predict_transaction(
 
     saved = crud.create_fraud_prediction(db, fraud_data)
 
+    if is_fraud:
+        crud.create_fraud_alert(db, saved, probability)
+
     # Compute comparative results across all models
     multi_results = predict_all_models(df)
 

@@ -76,7 +76,10 @@ def check_transaction_drift(
             drift_score=drift_score,
             drift_status=drift_status,
         )
-        return crud.create_drift_report(db, report)
+        saved_report = crud.create_drift_report(db, report)
+        if drift_status in {"warning", "drift_detected"}:
+            crud.create_drift_alert(db, saved_report)
+        return saved_report
     except InsufficientDriftDataError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

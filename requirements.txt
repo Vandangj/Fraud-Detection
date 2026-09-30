@@ -7,3 +7,6 @@ python-dotenv
 pandas
 numpy
 scikit-learn
+imbalanced-learn
+xgboost
+lightgbm
