@@ -11,6 +11,7 @@ export function Sidebar({ currentTab, onSelectTab, isOpen, onClose }) {
     { id: 'case-detail', label: 'Cases & SHAP', icon: 'fact_check' },
     { id: 'model-health', label: 'Model Health', icon: 'health_and_safety' },
     { id: 'drift-monitoring', label: 'Drift Monitoring', icon: 'ssid_chart' },
+    { id: 'db-tables', label: 'DB Tables Explorer', icon: 'table_view', badge: 'MySQL' },
     { id: 'users', label: 'Admin & Users', icon: 'manage_accounts', adminOnly: true },
   ];
 

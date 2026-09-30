@@ -9,6 +9,7 @@ import ModelHealthPage from './pages/ModelHealthPage';
 import DriftMonitoringPage from './pages/DriftMonitoringPage';
 import AlertsRetrainPage from './pages/AlertsRetrainPage';
 import AdminUsersPage from './pages/AdminUsersPage';
+import DatabaseTablesPage from './pages/DatabaseTablesPage';
 
 function AppContent() {
   const { user } = useAuth();
@@ -43,6 +44,8 @@ function AppContent() {
         return 'Model Health & Validation Performance';
       case 'drift-monitoring':
         return 'Population Stability Index (PSI) Drift Monitoring';
+      case 'db-tables':
+        return 'MySQL Database Tables Explorer';
       case 'users':
         return 'Admin & User Access Management';
       default:
@@ -90,6 +93,10 @@ function AppContent() {
 
       {currentTab === 'drift-monitoring' && (
         <DriftMonitoringPage key={`drift-${refreshKey}`} />
+      )}
+
+      {currentTab === 'db-tables' && (
+        <DatabaseTablesPage key={`db-${refreshKey}`} />
       )}
 
       {currentTab === 'alerts' && (

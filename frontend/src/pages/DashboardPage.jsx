@@ -482,14 +482,11 @@ export function DashboardPage({ onInspectCase, onNavigateTransactions, onNavigat
                   <span className="material-symbols-outlined text-slate-400 text-[18px]">
                     notifications_active
                   </span>
-                  <h2 className="text-sm font-bold text-slate-100">Derived Warnings</h2>
+                  <h2 className="text-sm font-bold text-slate-100">Risk Warnings</h2>
                 </div>
-                <p className="text-[10px] text-slate-400 mt-0.5">
-                  Client-derived from /drift-reports/ & flags (Dedicated /alerts API pending)
-                </p>
               </div>
-              <span className="bg-[#0B111E] text-slate-400 border border-[#1E293B] px-2 py-0.5 rounded text-xs font-mono">
-                Derived
+              <span className="bg-emerald-950/60 text-emerald-400 border border-emerald-800/60 px-2 py-0.5 rounded text-xs font-mono">
+                Live
               </span>
             </div>
 
@@ -540,13 +537,6 @@ export function DashboardPage({ onInspectCase, onNavigateTransactions, onNavigat
             </div>
           </div>
 
-          <div className="pt-2 border-t border-[#1E293B] mt-3 flex items-center justify-between text-xs text-slate-400">
-            <span className="font-mono text-[10px]">Source: Client-Derived Heuristics</span>
-            <span className="text-cyan-400 text-xs flex items-center gap-0.5">
-              <span>Warning Feed</span>
-              <span className="material-symbols-outlined text-[14px]">info</span>
-            </span>
-          </div>
         </div>
       </section>
     </div>

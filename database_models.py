@@ -1,8 +1,6 @@
-from sqlalchemy.orm import declarative_base
 from sqlalchemy import Column, Integer, String, DateTime, Numeric, Boolean
 from sqlalchemy import ForeignKey
-
-Base = declarative_base()
+from database import Base
 
 
 class User(Base):
@@ -78,3 +76,7 @@ class drift_reports(Base):
     drift_status = Column(String(50))
     checked_at = Column(DateTime)
     report_time = Column(DateTime)
+
+
+DriftReport = drift_reports
+FraudPrediction = Fraud_prediction

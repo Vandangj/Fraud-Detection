@@ -1,5 +1,6 @@
 from datetime import datetime
 
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 import database_models as models
@@ -78,6 +79,13 @@ def delete_user(db: Session, user_id: int):
 
 # transactions
 
+def _commit_transaction(db: Session):
+    try:
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+        raise
+
 def create_transaction(
     db: Session,
     transaction: schemas.TransactionCreate
@@ -96,7 +104,7 @@ def create_transaction(
     )
 
     db.add(db_transaction)
-    db.commit()
+    _commit_transaction(db)
     db.refresh(db_transaction)
 
     return db_transaction
@@ -104,6 +112,7 @@ def create_transaction(
 def get_transactions(db: Session, skip: int = 0, limit: int = 100):
     return (
         db.query(models.Transaction)
+        .order_by(models.Transaction.transaction_id.desc())
         .offset(skip)
         .limit(limit)
         .all()
@@ -133,7 +142,7 @@ def update_transaction(
     for key, value in update_data.items():
         setattr(db_transaction, key, value)
 
-    db.commit()
+    _commit_transaction(db)
     db.refresh(db_transaction)
 
     return db_transaction
@@ -147,12 +156,23 @@ def delete_transaction(db: Session, transaction_id: int):
         return None
 
     db.delete(db_transaction)
-    db.commit()
+    _commit_transaction(db)
 
     return db_transaction
 
 
 # models
+
+class ModelInUseError(Exception):
+    pass
+
+
+def _commit_model(db: Session):
+    try:
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+        raise
 
 def create_model(db: Session, model: schemas.ModelCreate):
 
@@ -169,14 +189,14 @@ def create_model(db: Session, model: schemas.ModelCreate):
     )
 
     db.add(db_model)
-    db.commit()
+    _commit_model(db)
     db.refresh(db_model)
 
     return db_model
 
 
 def get_models(db: Session):
-    return db.query(models.Model).all()
+    return db.query(models.Model).order_by(models.Model.model_id).all()
 
 
 def get_model(db: Session, model_id: str):
@@ -202,7 +222,7 @@ def update_model(
     for key, value in update_data.items():
         setattr(db_model, key, value)
 
-    db.commit()
+    _commit_model(db)
     db.refresh(db_model)
 
     return db_model
@@ -215,8 +235,17 @@ def delete_model(db: Session, model_id: str):
     if not db_model:
         return None
 
+    has_fraud_predictions = db.query(models.Fraud_prediction.prediction_id).filter(
+        models.Fraud_prediction.model_id == model_id
+    ).first()
+    has_drift_reports = db.query(models.drift_reports.report_id).filter(
+        models.drift_reports.model_id == model_id
+    ).first()
+    if has_fraud_predictions or has_drift_reports:
+        raise ModelInUseError(model_id)
+
     db.delete(db_model)
-    db.commit()
+    _commit_model(db)
 
     return db_model
 
@@ -276,6 +305,13 @@ def delete_fraud_prediction(
 
 # drift reports
 
+def _commit_drift_report(db: Session):
+    try:
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+        raise
+
 def create_drift_report(
     db: Session,
     report: schemas.DriftReportCreate
@@ -291,14 +327,36 @@ def create_drift_report(
     )
 
     db.add(db_report)
-    db.commit()
+    _commit_drift_report(db)
     db.refresh(db_report)
 
     return db_report
 
 
-def get_drift_reports(db: Session):
-    return db.query(models.drift_reports).all()
+def get_drift_reports(
+    db: Session,
+    skip: int = 0,
+    limit: int = 500,
+    model_id: str = None,
+    feature_name: str = None,
+    drift_status: str = None,
+):
+    query = db.query(models.drift_reports)
+    if model_id is not None:
+        query = query.filter(models.drift_reports.model_id == model_id)
+    if feature_name is not None:
+        query = query.filter(models.drift_reports.feature_name == feature_name)
+    if drift_status is not None:
+        query = query.filter(models.drift_reports.drift_status == drift_status)
+    return (
+        query.order_by(
+            models.drift_reports.report_time.desc(),
+            models.drift_reports.report_id.desc(),
+        )
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
 
 
 def get_drift_report(
@@ -322,6 +380,6 @@ def delete_drift_report(
         return None
 
     db.delete(report)
-    db.commit()
+    _commit_drift_report(db)
 
     return report

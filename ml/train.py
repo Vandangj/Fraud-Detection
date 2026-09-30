@@ -20,7 +20,7 @@ from imblearn.over_sampling import SMOTE
 # 1. LOAD DATASET
 # ==========================================
 
-DATA_PATH = "data/PS_20174392719_1491204439457_log.csv"
+DATA_PATH = "data/dataset.csv"
 
 df = pd.read_csv(DATA_PATH)
 

@@ -222,24 +222,21 @@ export function TransactionsPage({ onInspectCase }) {
           </div>
         </div>
 
-        <div className="flex items-center justify-between border-t border-[#1E293B] pt-2 text-[11px] text-slate-400">
-          <div className="flex items-center gap-2">
-            <span>Showing {filteredTransactions.length} of {transactions.length} records</span>
-            {(searchQuery || decisionFilter !== 'ALL' || typeFilter !== 'ALL') && (
-              <button
-                onClick={() => {
-                  setSearchQuery('');
-                  setDecisionFilter('ALL');
-                  setTypeFilter('ALL');
-                }}
-                className="text-cyan-400 hover:underline font-semibold"
-                type="button"
-              >
-                Reset Filters
-              </button>
-            )}
-          </div>
-          <div>FastAPI Endpoint: <code className="text-cyan-300 font-mono">/transactions/</code></div>
+        <div className="flex items-center gap-2 border-t border-[#1E293B] pt-2 text-[11px] text-slate-400">
+          <span>Showing {filteredTransactions.length} of {transactions.length} records</span>
+          {(searchQuery || decisionFilter !== 'ALL' || typeFilter !== 'ALL') && (
+            <button
+              onClick={() => {
+                setSearchQuery('');
+                setDecisionFilter('ALL');
+                setTypeFilter('ALL');
+              }}
+              className="text-cyan-400 hover:underline font-semibold"
+              type="button"
+            >
+              Reset Filters
+            </button>
+          )}
         </div>
       </section>
 
@@ -366,7 +363,9 @@ export function TransactionsPage({ onInspectCase }) {
                     </p>
                     <p className="text-[10px] text-slate-300 mt-0.5 font-sans">
                       {selectedTx.is_fraud
-                        ? 'Flagged by model rule or manual analyst review'
+                        ? (selectedTx.old_balance > 0 && selectedTx.new_balance === 0
+                            ? 'Flagged: 100% account balance emptied to 0.00 (High-risk account drain pattern)'
+                            : 'Flagged by Random Forest model rule or manual analyst review')
                         : 'Cleared within baseline distribution bounds'}
                     </p>
                   </div>
@@ -454,13 +453,6 @@ export function TransactionsPage({ onInspectCase }) {
                       </div>
                     </div>
                   </div>
-
-                  <PendingNotice
-                    feature="Live SHAP Calculations"
-                    endpoint="GET /frauds/{id}/shap"
-                    sourceFile="ml/predict.py"
-                    description="SHAP TreeExplainer generation will compute local waterfall values dynamically once ml/predict.py is implemented."
-                  />
                 </div>
               </div>
 
@@ -602,10 +594,6 @@ export function TransactionsPage({ onInspectCase }) {
             <label htmlFor="isFraudCheck" className="text-xs text-slate-300">
               Flag as Fraudulent (<code className="text-red-400">is_fraud = true</code>)
             </label>
-          </div>
-
-          <div className="p-2 bg-[#0F172A] rounded border border-[#223049] text-[11px] text-slate-400">
-            Will be persisted into the MySQL database via <code className="text-cyan-400">POST /transactions/</code>.
           </div>
 
           <div className="flex items-center justify-end gap-2 border-t border-[#1E293B] pt-3 mt-2">

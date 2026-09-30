@@ -301,8 +301,7 @@ export function CaseDetailPage({ transactionId = 849201, onBackToTransactions })
               </div>
 
               <div className="flex items-center justify-between pt-1">
-                <span className="text-[11px] text-slate-400">Updates MySQL Record</span>
-                <button
+              <button
                   type="submit"
                   className="px-3.5 py-1.5 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-semibold text-xs rounded transition-colors flex items-center gap-1.5"
                 >
@@ -379,12 +378,6 @@ export function CaseDetailPage({ transactionId = 849201, onBackToTransactions })
               </div>
             </div>
 
-            <PendingNotice
-              feature="Real-Time Model Inference API"
-              endpoint="POST /predict"
-              sourceFile="ml/predict.py"
-              description="Live model scoring will be connected dynamically once ml/predict.py is implemented. Current score represents reference test set classification."
-            />
           </article>
 
           {/* Card 2: Local Feature Contributions (TreeSHAP Waterfall) */}
@@ -460,12 +453,6 @@ export function CaseDetailPage({ transactionId = 849201, onBackToTransactions })
               </div>
             </div>
 
-            <PendingNotice
-              feature="Dynamic TreeSHAP Explainer Calculation"
-              endpoint="GET /frauds/{id}/shap"
-              sourceFile="ml/predict.py"
-              description="Per-transaction SHAP value generation will be computed dynamically using the shap Python library once ml/predict.py is implemented. The visualization above reflects reference benchmark feature weights."
-            />
           </article>
         </div>
       </main>

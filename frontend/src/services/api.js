@@ -179,59 +179,60 @@ export const api = {
   // when ML / auth components are implemented.
   // =========================================================================
 
-  // TODO: Authentication Endpoint (POST /auth/login)
-  // Currently users table exists, but no auth token generation route exists.
+  // Authentication — matches a user by email from /users
   authLogin: async (credentials) => {
-    console.warn('[PENDING_API] POST /auth/login is not implemented in backend. Using local session.');
-    return {
-      status: 'pending_implementation',
-      message: 'Auth backend route (POST /auth/login) pending implementation in routes/users.py',
-      credentials,
-    };
+    const users = await apiRequest('/users/?skip=0&limit=1000');
+    const match = users.find(
+      (u) => u.email === credentials.email
+    );
+    if (!match) throw new Error('User not found');
+    return match;
   },
 
-  // TODO: Real-Time ML Inference (POST /predict)
-  // Backend ml/predict.py is currently empty.
-  predictTransaction: async (features) => {
-    console.warn('[PENDING_API] POST /predict is not implemented in backend.');
-    return {
-      status: 'pending_implementation',
-      message: 'Model inference route (POST /predict) pending implementation in ml/predict.py',
-      features,
-    };
-  },
+  // Real-Time ML Inference — POST /predict
+  predictTransaction: (transactionData) =>
+    apiRequest('/predict/', {
+      method: 'POST',
+      body: JSON.stringify(transactionData),
+    }),
 
-  // TODO: SHAP Explainability Generation (GET /frauds/{id}/shap or POST /predict/explain)
-  // Feature attribution bar plots rely on TreeExplainer.
-  getShapExplanation: async (transactionId) => {
-    console.warn('[PENDING_API] SHAP calculation endpoint is not implemented in backend.');
-    return {
-      status: 'pending_implementation',
-      message: 'SHAP calculation route pending TreeExplainer implementation in ml/predict.py',
-      transactionId,
-    };
-  },
+  // SHAP Explainability — GET fraud prediction by transaction ID
+  getShapExplanation: (transactionId) =>
+    apiRequest(`/frauds/${transactionId}`),
 
-  // TODO: Automated Retrain Pipeline Trigger (POST /models/retrain)
-  // Backend ml/train.py is currently empty.
-  triggerRetrainPipeline: async (config) => {
-    console.warn('[PENDING_API] POST /models/retrain is not implemented in backend.');
-    return {
-      status: 'pending_implementation',
-      message: 'Retrain pipeline route (POST /models/retrain) pending implementation in ml/train.py',
-      config,
-    };
-  },
+  // Trigger Model Retrain — POST /retrain
+  triggerRetrainPipeline: () =>
+    apiRequest('/retrain/', {
+      method: 'POST',
+    }),
 
-  // TODO: Dedicated Alerts Management (GET /alerts/)
-  // Alert table does not exist in database_models.py; alerts are derived from drift_reports and high fraud scores.
-  getAlerts: async () => {
-    console.warn('[PENDING_API] Dedicated /alerts router is not implemented in backend.');
-    return {
-      status: 'pending_implementation',
-      message: 'Dedicated alerts endpoint pending database model implementation in backend.',
-    };
+  // Alerts derived from high fraud scores + drift reports
+  getAlerts: () =>
+    apiRequest('/alerts/'),
+
+  // ==========================================
+  // Multi-Model Comparative Benchmarking
+  // ==========================================
+  getModelsComparison: () =>
+    apiRequest('/models/comparison'),
+
+  // ==========================================
+  // Database Tables Explorer API (/tables)
+  // ==========================================
+  getDatabaseTables: () =>
+    apiRequest('/tables/'),
+
+  getTableData: (tableName, params = {}) => {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, val]) => {
+      if (val !== undefined && val !== null && val !== '') {
+        query.append(key, val);
+      }
+    });
+    const qs = query.toString();
+    return apiRequest(`/tables/${tableName}${qs ? `?${qs}` : ''}`);
   },
 };
 
 export default api;
+
