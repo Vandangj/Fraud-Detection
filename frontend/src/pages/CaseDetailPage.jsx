@@ -3,12 +3,14 @@ import { api } from '../services/api';
 import StatusBadge from '../components/Common/StatusBadge';
 import PendingNotice from '../components/Common/PendingNotice';
 
-export function CaseDetailPage({ transactionId = 849201, onBackToTransactions }) {
+export function CaseDetailPage({ transactionId, onBackToTransactions }) {
   const [transaction, setTransaction] = useState(null);
   const [loading, setLoading] = useState(true);
   const [verdict, setVerdict] = useState('fraud');
   const [notes, setNotes] = useState('');
-  const [submittedVerdict, setSubmittedVerdict] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitFeedback, setSubmitFeedback] = useState(null);
+  const [submitError, setSubmitError] = useState(null);
 
   useEffect(() => {
     loadCaseData();
@@ -16,51 +18,104 @@ export function CaseDetailPage({ transactionId = 849201, onBackToTransactions })
 
   const loadCaseData = async () => {
     setLoading(true);
+    setSubmitError(null);
     try {
+      let data = null;
+      // 1. Try provided transactionId if valid
       if (transactionId) {
-        const data = await api.getTransaction(transactionId);
-        setTransaction(data);
+        try {
+          data = await api.getTransaction(transactionId);
+        } catch {
+          // If transactionId is not found, fallback to fetching real latest transaction
+        }
       }
-    } catch {
-      // Fallback case from database structure
-      setTransaction({
-        transaction_id: transactionId || 849201,
-        user_id: 1,
-        sender_account_id: 'ACC-SND-99201',
-        destination_account_id: 'ACC-DST-44120',
-        amount: 2450.0,
-        old_balance: 5000.0,
-        new_balance: 2550.0,
-        transaction_type: 'TRANSFER',
-        step: 42,
-        is_fraud: true,
-      });
+
+      // 2. Fallback to latest transaction from backend if specific ID not found
+      if (!data) {
+        const txList = await api.getTransactions(0, 1);
+        if (Array.isArray(txList) && txList.length > 0) {
+          data = txList[0];
+        }
+      }
+
+      if (data) {
+        setTransaction(data);
+        setVerdict(data.is_fraud ? 'fraud' : 'legitimate');
+      } else {
+        // Fallback default case placeholder only if backend returned 0 transactions
+        setTransaction({
+          transaction_id: transactionId || 1,
+          user_id: 1,
+          sender_account_id: 'ACC-SND-99201',
+          destination_account_id: 'ACC-DST-44120',
+          amount: 2450.0,
+          old_balance: 5000.0,
+          new_balance: 2550.0,
+          transaction_type: 'TRANSFER',
+          step: 42,
+          is_fraud: true,
+        });
+      }
+    } catch (err) {
+      console.error('Failed to load case data:', err);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleUpdateFraudStatus = async (isFraud) => {
+  const handleSubmitDecision = async (targetVerdict = verdict) => {
+    if (!transaction?.transaction_id || isSubmitting) return;
+
+    setIsSubmitting(true);
+    setSubmitError(null);
+
+    // 1. "In Review" must NOT write is_fraud=false.
+    // Keep decision only in frontend session because backend has no review-status field.
+    if (targetVerdict === 'review') {
+      setVerdict('review');
+      setSubmitFeedback({
+        verdict: 'In Review',
+        persisted: false,
+        txId: transaction.transaction_id,
+        isFraud: transaction.is_fraud,
+        hasNotes: Boolean(notes && notes.trim()),
+      });
+      setIsSubmitting(false);
+      return;
+    }
+
+    // 2. Confirm Fraud → persist is_fraud=true.
+    // 3. Mark Legit → persist is_fraud=false.
+    const isFraudValue = targetVerdict === 'fraud';
+    const label = isFraudValue ? 'Confirm Fraud' : 'Mark Legit';
+
     try {
-      if (transaction?.transaction_id) {
-        const updated = await api.updateTransaction(transaction.transaction_id, {
-          is_fraud: isFraud,
-        });
-        setTransaction(updated);
-      }
-      setSubmittedVerdict(isFraud ? 'Confirmed Fraud' : 'Dismissed as Legitimate');
+      // Persist only fields actually supported by the backend
+      const updated = await api.updateTransaction(transaction.transaction_id, {
+        is_fraud: isFraudValue,
+      });
+
+      setTransaction(updated);
+      setVerdict(targetVerdict);
+
+      // Show clear, truthful feedback without fabricating note persistence
+      setSubmitFeedback({
+        verdict: label,
+        persisted: true,
+        isFraud: updated.is_fraud,
+        txId: updated.transaction_id,
+        hasNotes: Boolean(notes && notes.trim()),
+      });
     } catch (err) {
-      alert(`Error updating transaction: ${err.message}`);
+      // PRESERVE entered values (verdict and notes) if the request fails
+      setSubmitError(err.message || 'Failed to update transaction on backend.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  const handleSubmitVerdict = (e) => {
-    e.preventDefault();
-    handleUpdateFraudStatus(verdict === 'fraud');
-  };
-
   const currentTx = transaction || {
-    transaction_id: 849201,
+    transaction_id: transactionId || 1,
     amount: 2450.0,
     sender_account_id: 'ACC-SND-99201',
     destination_account_id: 'ACC-DST-44120',
@@ -86,25 +141,31 @@ export function CaseDetailPage({ transactionId = 849201, onBackToTransactions })
             <span>Case Review:</span>
             <span className="font-mono text-cyan-400">TX-{currentTx.transaction_id}</span>
           </h1>
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border border-red-500/50 bg-red-950/40 text-red-300 text-xs font-medium">
-            <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse"></span>
-            <span>Flagged by Random Forest (SMOTE)</span>
+          <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-xs font-medium ${
+            currentTx.is_fraud
+              ? 'border-red-500/50 bg-red-950/40 text-red-300'
+              : 'border-emerald-500/50 bg-emerald-950/40 text-emerald-300'
+          }`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${currentTx.is_fraud ? 'bg-red-400 animate-pulse' : 'bg-emerald-400'}`}></span>
+            <span>{currentTx.is_fraud ? 'Flagged as Fraud' : 'Cleared Baseline'}</span>
           </span>
         </div>
 
         {/* Action Buttons */}
         <div className="flex items-center gap-2 flex-wrap">
           <button
-            onClick={() => handleUpdateFraudStatus(true)}
-            className="h-8 px-3.5 bg-red-600 hover:bg-red-500 text-white rounded text-xs font-semibold flex items-center gap-1.5 shadow transition-colors"
+            onClick={() => handleSubmitDecision('fraud')}
+            disabled={isSubmitting}
+            className="h-8 px-3.5 bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white rounded text-xs font-semibold flex items-center gap-1.5 shadow transition-colors"
             type="button"
           >
             <span className="material-symbols-outlined text-sm">gavel</span>
             <span>Confirm Fraud & Block</span>
           </button>
           <button
-            onClick={() => handleUpdateFraudStatus(false)}
-            className="h-8 px-3 bg-[#0F172A] hover:bg-emerald-950/40 text-emerald-300 border border-emerald-500/40 rounded text-xs font-medium flex items-center gap-1.5 transition-colors"
+            onClick={() => handleSubmitDecision('legitimate')}
+            disabled={isSubmitting}
+            className="h-8 px-3 bg-[#0F172A] hover:bg-emerald-950/40 disabled:opacity-50 text-emerald-300 border border-emerald-500/40 rounded text-xs font-medium flex items-center gap-1.5 transition-colors"
             type="button"
           >
             <span className="material-symbols-outlined text-sm text-emerald-400">check_circle</span>
@@ -113,13 +174,68 @@ export function CaseDetailPage({ transactionId = 849201, onBackToTransactions })
         </div>
       </section>
 
-      {submittedVerdict && (
-        <div className="p-3 bg-emerald-950/50 border border-emerald-500/50 rounded-lg text-xs text-emerald-300 flex items-center gap-2">
-          <span className="material-symbols-outlined text-emerald-400 text-base">verified</span>
-          <span>
-            Analyst disposition recorded: <strong>{submittedVerdict}</strong>. Persisted via{' '}
-            <code className="text-cyan-300 font-mono">PUT /transactions/{currentTx.transaction_id}</code>.
-          </span>
+      {/* FEEDBACK BANNERS */}
+      {submitFeedback && (
+        <div className="p-3 bg-emerald-950/40 border border-emerald-500/40 rounded-lg text-xs text-emerald-200 space-y-1 shadow-sm">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="material-symbols-outlined text-emerald-400 text-base">
+                {submitFeedback.persisted ? 'verified' : 'pending_actions'}
+              </span>
+              <span className="font-semibold text-white">
+                Analyst Verdict Recorded: <span className="text-cyan-300 font-bold">{submitFeedback.verdict}</span>
+              </span>
+              {submitFeedback.persisted ? (
+                <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-emerald-900/60 border border-emerald-600/40 text-emerald-300">
+                  is_fraud = {String(submitFeedback.isFraud)}
+                </span>
+              ) : (
+                <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-amber-950/80 border border-amber-600/50 text-amber-300">
+                  Session Only (Not Persisted)
+                </span>
+              )}
+            </div>
+            <button
+              onClick={() => setSubmitFeedback(null)}
+              className="text-slate-400 hover:text-white p-0.5"
+              type="button"
+            >
+              <span className="material-symbols-outlined text-sm">close</span>
+            </button>
+          </div>
+          {submitFeedback.persisted ? (
+            <p className="text-[11px] text-slate-300">
+              Persisted via backend endpoint <code className="text-cyan-300 font-mono">PUT /transactions/{submitFeedback.txId}</code>.
+            </p>
+          ) : (
+            <p className="text-[11px] text-amber-300/90 font-sans">
+              "In Review" status is recorded in your active session only. It is <strong>not persisted to the database</strong> because the backend currently lacks a review-status field (the database only supports the boolean is_fraud flag).
+            </p>
+          )}
+          {submitFeedback.hasNotes && (
+            <p className="text-[10px] text-slate-400 font-sans italic">
+              * Note: Investigation notes are retained in your active session only (the backend transaction schema currently has no notes column).
+            </p>
+          )}
+        </div>
+      )}
+
+      {submitError && (
+        <div className="p-3 bg-red-950/50 border border-red-500/50 rounded-lg text-xs text-red-200 flex items-start justify-between gap-2 shadow-sm">
+          <div className="flex items-start gap-2">
+            <span className="material-symbols-outlined text-red-400 text-base shrink-0 mt-0.5">error</span>
+            <div className="space-y-0.5">
+              <span className="font-semibold text-red-300 block">Failed to Submit Decision:</span>
+              <span className="text-[11px] leading-relaxed break-words">{submitError}</span>
+            </div>
+          </div>
+          <button
+            onClick={() => setSubmitError(null)}
+            className="text-slate-400 hover:text-white p-0.5 shrink-0"
+            type="button"
+          >
+            <span className="material-symbols-outlined text-sm">close</span>
+          </button>
         </div>
       )}
 
@@ -229,7 +345,7 @@ export function CaseDetailPage({ transactionId = 849201, onBackToTransactions })
               </span>
             </div>
 
-            <form onSubmit={handleSubmitVerdict} className="space-y-3 text-xs">
+            <form onSubmit={(e) => { e.preventDefault(); handleSubmitDecision(verdict); }} className="space-y-3 text-xs">
               <div>
                 <label className="text-xs font-medium text-slate-300 block mb-1.5">Case Decision</label>
                 <div className="grid grid-cols-3 gap-2">
@@ -298,15 +414,32 @@ export function CaseDetailPage({ transactionId = 849201, onBackToTransactions })
                   placeholder="Record analysis reasoning, feature anomalies, or verification details..."
                   className="w-full text-xs font-sans p-2.5 bg-[#0F172A] border border-[#1E293B] text-white rounded focus:border-cyan-400 focus:outline-none placeholder:text-slate-500 resize-none"
                 ></textarea>
+                <span className="text-[10px] text-slate-400 block mt-1 font-sans">
+                  * Note: Submitting persists <code className="text-slate-300 font-mono">is_fraud</code> via backend PUT /transactions/{currentTx.transaction_id}. Investigation notes are retained in your active session (backend schema currently has no notes column).
+                </span>
               </div>
 
               <div className="flex items-center justify-between pt-1">
-              <button
+                <button
                   type="submit"
-                  className="px-3.5 py-1.5 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-semibold text-xs rounded transition-colors flex items-center gap-1.5"
+                  disabled={isSubmitting}
+                  className={`px-3.5 py-1.5 font-semibold text-xs rounded transition-colors flex items-center gap-1.5 ${
+                    isSubmitting
+                      ? 'bg-cyan-800 text-slate-300 cursor-not-allowed'
+                      : 'bg-cyan-500 hover:bg-cyan-400 text-slate-950'
+                  }`}
                 >
-                  <span className="material-symbols-outlined text-sm font-bold">check_circle</span>
-                  <span>Submit Decision</span>
+                  {isSubmitting ? (
+                    <>
+                      <span className="w-3 h-3 rounded-full border-2 border-slate-300 border-t-transparent animate-spin"></span>
+                      <span>Submitting Decision...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="material-symbols-outlined text-sm font-bold">check_circle</span>
+                      <span>Submit Decision</span>
+                    </>
+                  )}
                 </button>
               </div>
             </form>

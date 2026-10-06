@@ -30,9 +30,18 @@ async function apiRequest(endpoint, options = {}) {
       try {
         const errorData = await response.json();
         if (errorData?.detail) {
-          errorMessage = typeof errorData.detail === 'string' 
-            ? errorData.detail 
-            : JSON.stringify(errorData.detail);
+          if (typeof errorData.detail === 'string') {
+            errorMessage = errorData.detail;
+          } else if (Array.isArray(errorData.detail)) {
+            errorMessage = errorData.detail
+              .map((d) => {
+                const loc = Array.isArray(d.loc) ? d.loc.slice(1).join('.') : 'field';
+                return `${loc ? `${loc}: ` : ''}${d.msg || JSON.stringify(d)}`;
+              })
+              .join('; ');
+          } else {
+            errorMessage = JSON.stringify(errorData.detail);
+          }
         }
       } catch {
         // Response was not JSON

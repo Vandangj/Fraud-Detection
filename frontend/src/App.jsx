@@ -14,7 +14,7 @@ import DatabaseTablesPage from './pages/DatabaseTablesPage';
 function AppContent() {
   const { user } = useAuth();
   const [currentTab, setCurrentTab] = useState('dashboard');
-  const [selectedCaseId, setSelectedCaseId] = useState(849201);
+  const [selectedCaseId, setSelectedCaseId] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
   if (!user || !user.isAuthenticated) {
@@ -39,7 +39,7 @@ function AppContent() {
       case 'alerts':
         return 'Active Incidents & Mitigation Feed';
       case 'case-detail':
-        return `Case Investigation (TX-${selectedCaseId})`;
+        return selectedCaseId ? `Case Investigation (TX-${selectedCaseId})` : 'Case Investigation & SHAP';
       case 'model-health':
         return 'Model Health & Validation Performance';
       case 'drift-monitoring':

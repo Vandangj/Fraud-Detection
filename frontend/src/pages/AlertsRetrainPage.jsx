@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { api } from '../services/api';
 import { useAuth } from '../context/AuthContext';
-import PendingNotice from '../components/Common/PendingNotice';
 import StatusBadge from '../components/Common/StatusBadge';
 import Modal from '../components/Common/Modal';
 
@@ -8,54 +8,104 @@ export function AlertsRetrainPage({ onNavigateTransactions, onNavigateDrift }) {
   const { isAdmin } = useAuth();
   const [filterSeverity, setFilterSeverity] = useState('ALL');
   const [isRetrainModalOpen, setIsRetrainModalOpen] = useState(false);
+  const [alerts, setAlerts] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  // Clearly labeled warnings derived from transactions and drift reports
-  const [alerts, setAlerts] = useState([
-    {
-      id: 'WARN-101',
-      type: 'critical',
-      tag: 'FRAUD FLAG',
-      title: 'High-Risk Transaction Flagged by Random Forest (SMOTE)',
-      message:
-        'Transaction TX-849201 scored 0.94 fraud probability. Large transfer amount deviates significantly from baseline user behavior.',
-      timestamp: '14m ago',
-      code: 'TX-FLAGGED-01',
-      metric: 'Fraud Score: 0.94',
-    },
-    {
-      id: 'WARN-102',
-      type: 'critical',
-      tag: 'DRIFT WARNING',
-      title: 'Feature Drift Anomaly on destination_step_diff',
-      message:
-        'Population Stability Index (PSI) reached 0.282 on destination_step_diff, exceeding the 0.250 threshold recorded in /drift-reports/.',
-      timestamp: '32m ago',
-      code: 'DRIFT-REPORT-04',
-      metric: 'PSI: 0.282',
-    },
-    {
-      id: 'WARN-103',
-      type: 'warning',
-      tag: 'RECALL NOTICE',
-      title: 'Validation Recall Softened to 87.2% (Target: 88.0%)',
-      message:
-        'Test split recall softened slightly across online transfers. Model retraining with SMOTE dataset recommended to re-optimize classification boundary.',
-      timestamp: '2 hours ago',
-      code: 'MODEL-EVAL-03',
-      metric: 'Recall: 87.2%',
-    },
-    {
-      id: 'WARN-104',
-      type: 'resolved',
-      tag: 'DATASET LOADED',
-      title: 'Benchmark Dataset Ingestion Complete',
-      message:
-        'Synthetic credit card fraud transactions verified and loaded into MySQL database via load_dataset.py.',
-      timestamp: '4 hours ago',
-      code: 'DB-LOAD-01',
-      metric: 'MySQL Ingestion OK',
-    },
-  ]);
+  useEffect(() => {
+    loadAlerts();
+  }, []);
+
+  const loadAlerts = async () => {
+    setLoading(true);
+    try {
+      // 1. Fetch real alerts from GET /alerts/
+      let realAlerts = [];
+      try {
+        const data = await api.getAlerts();
+        if (Array.isArray(data) && data.length > 0) {
+          realAlerts = data.map((a) => {
+            const isCrit = a.severity === 'critical' || a.severity === 'high';
+            const isWarn = a.severity === 'medium' || a.severity === 'warning';
+            return {
+              id: `ALERT-${a.alert_id}`,
+              type: isCrit ? 'critical' : isWarn ? 'warning' : 'resolved',
+              tag: a.alert_type === 'FRAUD_DETECTED' ? 'FRAUD FLAG' : 'DRIFT WARNING',
+              title: a.alert_type === 'FRAUD_DETECTED'
+                ? `Fraud Flag on Transaction TX-${a.transaction_id}`
+                : `Feature Drift Warning on ${a.feature_name || 'Model'}`,
+              message: a.message,
+              timestamp: a.timestamp ? new Date(a.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Recently',
+              code: a.model_id || (a.alert_type === 'FRAUD_DETECTED' ? 'TX-FLAGGED' : 'DRIFT-REPORT'),
+              metric: a.fraud_probability != null
+                ? `Fraud Score: ${(a.fraud_probability * 100).toFixed(1)}%`
+                : a.drift_score != null
+                ? `PSI: ${a.drift_score.toFixed(3)}`
+                : a.severity?.toUpperCase(),
+            };
+          });
+        }
+      } catch (err) {
+        console.warn('GET /alerts/ failed:', err.message);
+      }
+
+      // 2. If no alerts table rows, derive strictly from real fetched transactions and drift reports
+      if (realAlerts.length === 0) {
+        const [txRes, driftRes] = await Promise.allSettled([
+          api.getTransactions(0, 100),
+          api.getDriftReports(),
+        ]);
+
+        const derived = [];
+
+        if (txRes.status === 'fulfilled' && Array.isArray(txRes.value)) {
+          txRes.value
+            .filter((t) => t.is_fraud)
+            .slice(0, 10)
+            .forEach((t) => {
+              derived.push({
+                id: `TX-WARN-${t.transaction_id}`,
+                type: 'critical',
+                tag: 'FRAUD FLAG',
+                title: `Flagged Transaction TX-${t.transaction_id}`,
+                message: `Real transaction TX-${t.transaction_id} (${t.transaction_type}) of $${Number(t.amount || 0).toLocaleString()} flagged as fraudulent in database.`,
+                timestamp: `Step ${t.step || 1}`,
+                code: `TX-${t.transaction_id}`,
+                metric: `is_fraud = true`,
+              });
+            });
+        }
+
+        if (driftRes.status === 'fulfilled' && Array.isArray(driftRes.value)) {
+          driftRes.value
+            .filter((d) => d.drift_status === 'warning' || d.drift_status === 'drift_detected')
+            .slice(0, 10)
+            .forEach((d) => {
+              const isDetected = d.drift_status === 'drift_detected';
+              derived.push({
+                id: `DRIFT-WARN-${d.report_id}`,
+                type: isDetected ? 'critical' : 'warning',
+                tag: 'DRIFT WARNING',
+                title: `Drift Alert on ${d.feature_name}`,
+                message: `Feature ${d.feature_name} registered Population Stability Index (PSI) of ${Number(d.drift_score || 0).toFixed(3)} (${d.drift_status.replace('_', ' ')}).`,
+                timestamp: d.report_time ? new Date(d.report_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Recent check',
+                code: d.model_id || 'DRIFT',
+                metric: `PSI: ${Number(d.drift_score || 0).toFixed(3)}`,
+              });
+            });
+        }
+
+        realAlerts = derived;
+      }
+
+      // Set only real alerts or derived warnings (no hardcoded fallback sample warnings)
+      setAlerts(realAlerts);
+    } catch (err) {
+      console.error('Error fetching alerts or derived data:', err);
+      setAlerts([]);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleAcknowledgeAlert = (id) => {
     setAlerts((prev) =>
@@ -68,16 +118,12 @@ export function AlertsRetrainPage({ onNavigateTransactions, onNavigateDrift }) {
     return a.type === filterSeverity.toLowerCase();
   });
 
+  const criticalCount = alerts.filter((a) => a.type === 'critical').length;
+  const warningCount = alerts.filter((a) => a.type === 'warning').length;
+  const resolvedCount = alerts.filter((a) => a.type === 'resolved').length;
+
   return (
     <div className="space-y-5">
-      {/* Pending Backend Alerts API Notice */}
-      <PendingNotice
-        feature="Dedicated Alerts API"
-        endpoint="GET /alerts/"
-        sourceFile="routes/alerts.py (Pending backend implementation)"
-        description="Notice: A dedicated alerts table and router do not exist in the current FastAPI backend. The incident feed below displays warnings derived client-side from transaction fraud flags (is_fraud=true) and model drift reports (/drift-reports)."
-      />
-
       {/* Alert Metric Summary Header */}
       <section className="bg-[#131D31] border border-[#1E293B] rounded-lg p-4 space-y-4 shadow-sm">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -96,15 +142,15 @@ export function AlertsRetrainPage({ onNavigateTransactions, onNavigateDrift }) {
           <div className="flex items-center gap-2 flex-wrap">
             <div className="flex items-center gap-2 px-3 py-1.5 bg-red-950/50 text-red-300 border border-red-500/30 rounded-md">
               <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
-              <span className="text-xs font-semibold uppercase font-mono">2 Critical</span>
+              <span className="text-xs font-semibold uppercase font-mono">{criticalCount} Critical</span>
             </div>
             <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-950/40 text-amber-300 border border-amber-500/30 rounded-md">
               <span className="w-2 h-2 rounded-full bg-amber-400"></span>
-              <span className="text-xs font-semibold uppercase font-mono">1 Warning</span>
+              <span className="text-xs font-semibold uppercase font-mono">{warningCount} Warning</span>
             </div>
             <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-950/40 text-emerald-300 border border-emerald-500/30 rounded-md">
               <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-              <span className="text-xs font-semibold uppercase font-mono">Resolved</span>
+              <span className="text-xs font-semibold uppercase font-mono">{resolvedCount} Resolved</span>
             </div>
           </div>
         </div>
@@ -141,6 +187,22 @@ export function AlertsRetrainPage({ onNavigateTransactions, onNavigateDrift }) {
 
       {/* Alerts Stream */}
       <section className="space-y-3">
+        {loading && (
+          <div className="bg-[#131D31] border border-[#1E293B] rounded-lg p-10 text-center space-y-2">
+            <div className="w-6 h-6 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin mx-auto"></div>
+            <p className="text-xs text-slate-400">Loading alerts and risk warnings...</p>
+          </div>
+        )}
+
+        {!loading && filteredAlerts.length === 0 && (
+          <div className="bg-[#131D31] border border-[#1E293B] rounded-lg p-10 text-center space-y-2">
+            <span className="material-symbols-outlined text-3xl text-slate-500">notifications_off</span>
+            <h3 className="text-sm font-semibold text-slate-200">No alerts available</h3>
+            <p className="text-xs text-slate-400 max-w-sm mx-auto">
+              No active fraud incidents or model drift warnings currently detected in the system.
+            </p>
+          </div>
+        )}
         {filteredAlerts.map((alert) => {
           const isCritical = alert.type === 'critical';
           const isWarning = alert.type === 'warning';
