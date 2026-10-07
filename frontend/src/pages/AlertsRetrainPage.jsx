@@ -3,6 +3,7 @@ import { api } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import StatusBadge from '../components/Common/StatusBadge';
 import Modal from '../components/Common/Modal';
+import PendingNotice from '../components/Common/PendingNotice';
 
 export function AlertsRetrainPage({ onNavigateTransactions, onNavigateDrift }) {
   const { isAdmin } = useAuth();
@@ -18,99 +19,46 @@ export function AlertsRetrainPage({ onNavigateTransactions, onNavigateDrift }) {
   const loadAlerts = async () => {
     setLoading(true);
     try {
-      // 1. Fetch real alerts from GET /alerts/
-      let realAlerts = [];
-      try {
-        const data = await api.getAlerts();
-        if (Array.isArray(data) && data.length > 0) {
-          realAlerts = data.map((a) => {
-            const isCrit = a.severity === 'critical' || a.severity === 'high';
-            const isWarn = a.severity === 'medium' || a.severity === 'warning';
-            return {
-              id: `ALERT-${a.alert_id}`,
-              type: isCrit ? 'critical' : isWarn ? 'warning' : 'resolved',
-              tag: a.alert_type === 'FRAUD_DETECTED' ? 'FRAUD FLAG' : 'DRIFT WARNING',
-              title: a.alert_type === 'FRAUD_DETECTED'
-                ? `Fraud Flag on Transaction TX-${a.transaction_id}`
-                : `Feature Drift Warning on ${a.feature_name || 'Model'}`,
-              message: a.message,
-              timestamp: a.timestamp ? new Date(a.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Recently',
-              code: a.model_id || (a.alert_type === 'FRAUD_DETECTED' ? 'TX-FLAGGED' : 'DRIFT-REPORT'),
-              metric: a.fraud_probability != null
-                ? `Fraud Score: ${(a.fraud_probability * 100).toFixed(1)}%`
-                : a.drift_score != null
-                ? `PSI: ${a.drift_score.toFixed(3)}`
-                : a.severity?.toUpperCase(),
-            };
-          });
-        }
-      } catch (err) {
-        console.warn('GET /alerts/ failed:', err.message);
-      }
+      const reports = await api.getDriftReports();
+      const psiAlerts = (Array.isArray(reports) ? reports : [])
+        .map((report) => {
+          const psi = Number(report.drift_score);
+          if (!Number.isFinite(psi) || psi < 0.10) return null;
 
-      // 2. If no alerts table rows, derive strictly from real fetched transactions and drift reports
-      if (realAlerts.length === 0) {
-        const [txRes, driftRes] = await Promise.allSettled([
-          api.getTransactions(0, 100),
-          api.getDriftReports(),
-        ]);
+          const type = psi >= 0.25 ? 'risky' : 'moderate';
+          const date = report.report_time || report.checked_at;
+          return {
+            id: `DRIFT-${report.report_id}`,
+            type,
+            psi,
+            tag: type.toUpperCase(),
+            title: `${type === 'risky' ? 'Risky' : 'Moderate'} PSI: ${report.feature_name}`,
+            message: `Model ${report.model_id} recorded PSI ${psi.toFixed(3)} for ${report.feature_name}.`,
+            impact: type === 'risky'
+              ? `PSI ${psi.toFixed(3)} is at or above 0.25, the project's drift-detected threshold. Investigate this feature before relying on current model decisions.`
+              : `PSI ${psi.toFixed(3)} is in the moderate band (0.10 to less than 0.25). Monitor the next report and investigate if it rises to 0.25.`,
+            timestamp: date
+              ? new Date(date).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
+              : 'Time unavailable',
+            code: report.model_id,
+            source: `Drift report #${report.report_id}`,
+            metric: `PSI: ${psi.toFixed(3)}`,
+            actionLabel: 'Open drift monitoring',
+          };
+        })
+        .filter(Boolean)
+        .sort((left, right) => {
+          const groupOrder = (left.type === 'risky' ? 0 : 1) - (right.type === 'risky' ? 0 : 1);
+          return groupOrder || right.psi - left.psi || right.id.localeCompare(left.id);
+        });
 
-        const derived = [];
-
-        if (txRes.status === 'fulfilled' && Array.isArray(txRes.value)) {
-          txRes.value
-            .filter((t) => t.is_fraud)
-            .slice(0, 10)
-            .forEach((t) => {
-              derived.push({
-                id: `TX-WARN-${t.transaction_id}`,
-                type: 'critical',
-                tag: 'FRAUD FLAG',
-                title: `Flagged Transaction TX-${t.transaction_id}`,
-                message: `Real transaction TX-${t.transaction_id} (${t.transaction_type}) of $${Number(t.amount || 0).toLocaleString()} flagged as fraudulent in database.`,
-                timestamp: `Step ${t.step || 1}`,
-                code: `TX-${t.transaction_id}`,
-                metric: `is_fraud = true`,
-              });
-            });
-        }
-
-        if (driftRes.status === 'fulfilled' && Array.isArray(driftRes.value)) {
-          driftRes.value
-            .filter((d) => d.drift_status === 'warning' || d.drift_status === 'drift_detected')
-            .slice(0, 10)
-            .forEach((d) => {
-              const isDetected = d.drift_status === 'drift_detected';
-              derived.push({
-                id: `DRIFT-WARN-${d.report_id}`,
-                type: isDetected ? 'critical' : 'warning',
-                tag: 'DRIFT WARNING',
-                title: `Drift Alert on ${d.feature_name}`,
-                message: `Feature ${d.feature_name} registered Population Stability Index (PSI) of ${Number(d.drift_score || 0).toFixed(3)} (${d.drift_status.replace('_', ' ')}).`,
-                timestamp: d.report_time ? new Date(d.report_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Recent check',
-                code: d.model_id || 'DRIFT',
-                metric: `PSI: ${Number(d.drift_score || 0).toFixed(3)}`,
-              });
-            });
-        }
-
-        realAlerts = derived;
-      }
-
-      // Set only real alerts or derived warnings (no hardcoded fallback sample warnings)
-      setAlerts(realAlerts);
+      setAlerts(psiAlerts);
     } catch (err) {
-      console.error('Error fetching alerts or derived data:', err);
+      console.error('Failed to load PSI alerts:', err);
       setAlerts([]);
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleAcknowledgeAlert = (id) => {
-    setAlerts((prev) =>
-      prev.map((a) => (a.id === id ? { ...a, type: 'resolved', tag: 'RESOLVED' } : a))
-    );
   };
 
   const filteredAlerts = alerts.filter((a) => {
@@ -118,9 +66,8 @@ export function AlertsRetrainPage({ onNavigateTransactions, onNavigateDrift }) {
     return a.type === filterSeverity.toLowerCase();
   });
 
-  const criticalCount = alerts.filter((a) => a.type === 'critical').length;
-  const warningCount = alerts.filter((a) => a.type === 'warning').length;
-  const resolvedCount = alerts.filter((a) => a.type === 'resolved').length;
+  const riskyCount = alerts.filter((a) => a.type === 'risky').length;
+  const moderateCount = alerts.filter((a) => a.type === 'moderate').length;
 
   return (
     <div className="space-y-5">
@@ -131,26 +78,22 @@ export function AlertsRetrainPage({ onNavigateTransactions, onNavigateDrift }) {
             <div className="flex items-center gap-2 mb-1">
               <span className="material-symbols-outlined text-cyan-400 text-xl">warning</span>
               <h1 className="text-base font-semibold text-white tracking-tight">
-                Derived Risk & Drift Warnings
+                PSI Risk Alerts
               </h1>
             </div>
             <p className="text-xs text-slate-400">
-              Heuristic warnings derived from transaction scores and Population Stability Index (PSI) drift reports.
+              Only drift reports with PSI at or above 0.10 are listed. Risky is 0.25 or higher; Moderate is 0.10 to less than 0.25.
             </p>
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
             <div className="flex items-center gap-2 px-3 py-1.5 bg-red-950/50 text-red-300 border border-red-500/30 rounded-md">
               <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
-              <span className="text-xs font-semibold uppercase font-mono">{criticalCount} Critical</span>
+              <span className="text-xs font-semibold uppercase font-mono">{riskyCount} Risky</span>
             </div>
             <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-950/40 text-amber-300 border border-amber-500/30 rounded-md">
               <span className="w-2 h-2 rounded-full bg-amber-400"></span>
-              <span className="text-xs font-semibold uppercase font-mono">{warningCount} Warning</span>
-            </div>
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-950/40 text-emerald-300 border border-emerald-500/30 rounded-md">
-              <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-              <span className="text-xs font-semibold uppercase font-mono">{resolvedCount} Resolved</span>
+              <span className="text-xs font-semibold uppercase font-mono">{moderateCount} Moderate</span>
             </div>
           </div>
         </div>
@@ -158,7 +101,7 @@ export function AlertsRetrainPage({ onNavigateTransactions, onNavigateDrift }) {
         {/* Filter Tabs & Category Bar */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between pt-3 border-t border-[#1E293B] gap-2">
           <div className="flex items-center bg-[#0B111E] p-0.5 rounded border border-[#1E293B] text-xs">
-            {['ALL', 'CRITICAL', 'WARNING', 'RESOLVED'].map((tab) => (
+            {['ALL', 'RISKY', 'MODERATE'].map((tab) => (
               <button
                 key={tab}
                 onClick={() => setFilterSeverity(tab)}
@@ -197,22 +140,24 @@ export function AlertsRetrainPage({ onNavigateTransactions, onNavigateDrift }) {
         {!loading && filteredAlerts.length === 0 && (
           <div className="bg-[#131D31] border border-[#1E293B] rounded-lg p-10 text-center space-y-2">
             <span className="material-symbols-outlined text-3xl text-slate-500">notifications_off</span>
-            <h3 className="text-sm font-semibold text-slate-200">No alerts available</h3>
+            <h3 className="text-sm font-semibold text-slate-200">
+              {filterSeverity === 'ALL' ? 'No moderate or risky PSI reports' : `No ${filterSeverity.toLowerCase()} PSI reports`}
+            </h3>
             <p className="text-xs text-slate-400 max-w-sm mx-auto">
-              No active fraud incidents or model drift warnings currently detected in the system.
+              PSI reports below 0.10 are excluded from this list.
             </p>
           </div>
         )}
         {filteredAlerts.map((alert) => {
-          const isCritical = alert.type === 'critical';
-          const isWarning = alert.type === 'warning';
+          const isRisky = alert.type === 'risky';
+          const isModerate = alert.type === 'moderate';
           return (
             <article
               key={alert.id}
               className={`bg-[#131D31] rounded-lg p-4 space-y-3 shadow-sm border transition-all ${
-                isCritical
+                isRisky
                   ? 'border-l-4 border-l-red-500 border-[#1E293B]'
-                  : isWarning
+                  : isModerate
                   ? 'border-l-4 border-l-amber-500 border-[#1E293B]'
                   : 'border-l-4 border-l-emerald-500 border-[#1E293B] opacity-80'
               }`}
@@ -221,22 +166,22 @@ export function AlertsRetrainPage({ onNavigateTransactions, onNavigateDrift }) {
                 <div className="flex items-start gap-3">
                   <span
                     className={`p-1.5 rounded border ${
-                      isCritical
+                      isRisky
                         ? 'bg-red-950/60 text-red-400 border-red-800/60'
-                        : isWarning
+                        : isModerate
                         ? 'bg-amber-950/60 text-amber-400 border-amber-800/60'
                         : 'bg-emerald-950/60 text-emerald-400 border-emerald-800/60'
                     }`}
                   >
                     <span className="material-symbols-outlined text-base">
-                      {isCritical ? 'report' : isWarning ? 'trending_down' : 'check_circle'}
+                      {isRisky ? 'report' : 'trending_down'}
                     </span>
                   </span>
 
                   <div>
                     <div className="flex items-center gap-2 flex-wrap">
                       <StatusBadge
-                        status={isCritical ? 'critical' : isWarning ? 'warning' : 'stable'}
+                        status={isRisky ? 'critical' : 'warning'}
                         label={alert.tag}
                       />
                       <span className="text-xs font-mono text-slate-400">{alert.code}</span>
@@ -257,74 +202,45 @@ export function AlertsRetrainPage({ onNavigateTransactions, onNavigateDrift }) {
                 <p className="leading-relaxed">{alert.message}</p>
               </div>
 
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                <div className="p-3 bg-[#0B111E] border border-[#1E293B] rounded space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-slate-400">Severity</span>
+                    <span className="text-white font-semibold capitalize">{alert.type}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-slate-400">Source</span>
+                    <span className="text-cyan-300 font-mono text-right">{alert.source || alert.code}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-slate-400">Alert ID</span>
+                    <span className="text-slate-200 font-mono">{alert.alertId || alert.id}</span>
+                  </div>
+                </div>
+                <div className="p-3 bg-[#0B111E] border border-[#1E293B] rounded">
+                  <div className="text-slate-400 font-semibold uppercase text-[10px] mb-1">What this means</div>
+                  <p className="text-slate-300 leading-relaxed">{alert.impact || alert.message}</p>
+                </div>
+              </div>
+
               <div className="flex items-center justify-between pt-1 text-xs">
                 <div className="flex items-center gap-2">
-                  {isCritical && (
+                  {(isRisky || isModerate) && (
                     <button
-                      onClick={onNavigateTransactions}
-                      className="h-7 px-3 bg-red-600 hover:bg-red-500 text-white font-medium rounded transition-colors flex items-center gap-1"
-                      type="button"
-                    >
-                      <span className="material-symbols-outlined text-xs">visibility</span>
-                      <span>View in Transactions</span>
-                    </button>
-                  )}
-                  {isWarning && (
-                    <button
-                      onClick={() => setIsRetrainModalOpen(true)}
+                      onClick={onNavigateDrift}
                       className="h-7 px-3 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-semibold rounded transition-colors flex items-center gap-1"
                       type="button"
                     >
-                      <span className="material-symbols-outlined text-xs font-bold">bolt</span>
-                      <span>View Retrain Requirements</span>
+                      <span className="material-symbols-outlined text-xs font-bold">ssid_chart</span>
+                      <span>{alert.actionLabel || 'Open drift monitoring'}</span>
                     </button>
                   )}
                 </div>
 
-                {alert.type !== 'resolved' && (
-                  <button
-                    onClick={() => handleAcknowledgeAlert(alert.id)}
-                    className="h-7 px-3 bg-[#0B111E] border border-[#1E293B] text-slate-400 hover:text-white rounded transition-colors flex items-center gap-1"
-                    type="button"
-                  >
-                    <span className="material-symbols-outlined text-xs">check</span>
-                    <span>Acknowledge</span>
-                  </button>
-                )}
               </div>
             </article>
           );
         })}
-      </section>
-
-      {/* Real Project Status Summary */}
-      <section className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 text-xs font-sans">
-        <div className="bg-[#131D31] border border-[#1E293B] p-3 rounded-lg">
-          <div className="flex justify-between font-mono text-slate-400 uppercase text-[10px]">
-            <span>FastAPI Service</span>
-            <span className="text-emerald-400 font-bold">Running</span>
-          </div>
-          <div className="text-sm font-bold font-mono text-white mt-1">localhost:8000</div>
-          <p className="text-[11px] text-slate-400 mt-0.5">Uvicorn ASGI Server</p>
-        </div>
-
-        <div className="bg-[#131D31] border border-[#1E293B] p-3 rounded-lg">
-          <div className="flex justify-between font-mono text-slate-400 uppercase text-[10px]">
-            <span>Database Backend</span>
-            <span className="text-cyan-400 font-bold">Connected</span>
-          </div>
-          <div className="text-sm font-bold font-mono text-white mt-1">MySQL Local</div>
-          <p className="text-[11px] text-slate-400 mt-0.5">SQLAlchemy ORM</p>
-        </div>
-
-        <div className="bg-[#131D31] border border-[#1E293B] p-3 rounded-lg">
-          <div className="flex justify-between font-mono text-slate-400 uppercase text-[10px]">
-            <span>Primary Model</span>
-            <span className="text-cyan-400 font-bold">v1.0</span>
-          </div>
-          <div className="text-sm font-bold font-mono text-white mt-1">Random Forest (SMOTE)</div>
-          <p className="text-[11px] text-slate-400 mt-0.5">scikit-learn Classifier</p>
-        </div>
       </section>
 
       {/* Retrain Pipeline Status Modal */}
