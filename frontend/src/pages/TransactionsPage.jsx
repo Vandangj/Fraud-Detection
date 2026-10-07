@@ -17,11 +17,14 @@ export function TransactionsPage({ onInspectCase }) {
   // Selected Transaction for Drawer
   const [selectedTx, setSelectedTx] = useState(null);
 
+  // Users list from backend for valid sender mapping
+  const [usersList, setUsersList] = useState([]);
+
   // Modal State for Adding Transaction
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [formData, setFormData] = useState({
     user_id: 1,
-    sender_account_id: 'ACC-SND-1049',
+    sender_account_id: 'ACC-USR-1001',
     destination_account_id: 'ACC-DST-8821',
     step: 1,
     transaction_type: 'TRANSFER',
@@ -31,10 +34,30 @@ export function TransactionsPage({ onInspectCase }) {
     is_fraud: false,
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [modalError, setModalError] = useState(null);
+  const [successFeedback, setSuccessFeedback] = useState(null);
 
   useEffect(() => {
     loadTransactions();
+    loadUsers();
   }, []);
+
+  const loadUsers = async () => {
+    try {
+      const usersData = await api.getUsers(0, 100);
+      if (Array.isArray(usersData) && usersData.length > 0) {
+        setUsersList(usersData);
+        // Pre-sync sender account to match an existing valid user
+        setFormData((prev) => ({
+          ...prev,
+          user_id: usersData[0].user_id,
+          sender_account_id: usersData[0].account_id || prev.sender_account_id,
+        }));
+      }
+    } catch (uErr) {
+      console.warn('Could not pre-load users list:', uErr.message);
+    }
+  };
 
   const loadTransactions = async () => {
     setLoading(true);
@@ -55,33 +78,132 @@ export function TransactionsPage({ onInspectCase }) {
     }
   };
 
-  // CRUD: Create Transaction
+  // CRUD: Create Transaction & Score
   const handleCreateSubmit = async (e) => {
     e.preventDefault();
+    if (isSubmitting) return;
+
+    // Validate fields client-side before sending
+    const userIdNum = Number(formData.user_id);
+    if (!userIdNum || userIdNum <= 0) {
+      setModalError('Valid User ID (> 0) is required.');
+      return;
+    }
+    const senderAcc = formData.sender_account_id?.trim();
+    if (!senderAcc) {
+      setModalError('Sender Account ID is required.');
+      return;
+    }
+    const destAcc = formData.destination_account_id?.trim();
+    if (!destAcc) {
+      setModalError('Destination Account ID is required.');
+      return;
+    }
+    const amountNum = Number(formData.amount);
+    if (isNaN(amountNum) || amountNum <= 0) {
+      setModalError('Transaction amount must be greater than 0.');
+      return;
+    }
+    const stepNum = Number(formData.step);
+    if (isNaN(stepNum) || stepNum < 0) {
+      setModalError('Step must be a non-negative integer (>= 0).');
+      return;
+    }
+    const oldBal = formData.old_balance !== '' ? Number(formData.old_balance) : 0;
+    const newBal = formData.new_balance !== '' ? Number(formData.new_balance) : 0;
+    if (oldBal < 0 || newBal < 0) {
+      setModalError('Balances cannot be negative.');
+      return;
+    }
+
     setIsSubmitting(true);
+    setModalError(null);
+
     try {
+      // Build payload matching backend schemas.TransactionCreate
       const payload = {
-        user_id: Number(formData.user_id),
-        sender_account_id: formData.sender_account_id,
-        destination_account_id: formData.destination_account_id,
-        step: Number(formData.step),
+        user_id: userIdNum,
+        sender_account_id: senderAcc,
+        destination_account_id: destAcc,
+        step: stepNum,
         transaction_type: formData.transaction_type,
-        amount: Number(formData.amount),
-        old_balance: Number(formData.old_balance),
-        new_balance: Number(formData.new_balance),
-        is_fraud: Boolean(formData.is_fraud),
+        amount: amountNum,
+        old_balance: oldBal,
+        new_balance: newBal,
       };
 
-      const newTx = await api.createTransaction(payload);
+      // Only send manual override if explicitly checked by user;
+      // Do NOT send is_fraud=false merely because the checkbox is unchecked.
+      // Omission allows the backend/model to auto-score via Random Forest.
+      if (formData.is_fraud) {
+        payload.is_fraud = true;
+      }
+
+      // 1. POST the transaction using the existing backend
+      let newTx = await api.createTransaction(payload);
+
+      // 2. Real scoring endpoint call if available
+      let scoringResult = null;
+      let scoringUnavailable = false;
+      try {
+        const predictPayload = {
+          transaction_id: newTx.transaction_id,
+          model_id: 'rf-balanced-v1',
+          step: Number(newTx.step ?? stepNum),
+          amount: Number(newTx.amount),
+          oldbalanceOrg: Number(newTx.old_balance ?? oldBal),
+          newbalanceOrig: Number(newTx.new_balance ?? newBal),
+          oldbalanceDest: 0,
+          newbalanceDest: Number(newTx.amount),
+          isFlaggedFraud: 0,
+          transaction_type: newTx.transaction_type,
+        };
+        const predictRes = await api.predictTransaction(predictPayload);
+        if (predictRes && typeof predictRes.fraud_probability === 'number') {
+          scoringResult = predictRes;
+
+          // Ensure stored transaction fraud state and displayed POST /predict/ result cannot contradict each other:
+          // If the user did not manually override, ensure the stored transaction matches the model prediction.
+          if (!formData.is_fraud && scoringResult.prediction !== newTx.is_fraud) {
+            try {
+              const syncedTx = await api.updateTransaction(newTx.transaction_id, {
+                is_fraud: scoringResult.prediction,
+              });
+              newTx = syncedTx;
+            } catch (syncErr) {
+              console.warn('Could not sync transaction fraud status with scoring result:', syncErr.message);
+            }
+          }
+        } else {
+          scoringUnavailable = true;
+        }
+      } catch (scoreErr) {
+        console.warn('Real-time ML scoring call failed / unavailable:', scoreErr.message);
+        // Do NOT fabricate score
+        scoringUnavailable = true;
+      }
+
+      // 3. Update transaction state and UI
       setTransactions((prev) => [newTx, ...prev]);
       setSelectedTx(newTx);
       setIsAddModalOpen(false);
-      // Reset form
+
+      // 4. Set readable feedback banner ensuring consistent verdict display
+      setSuccessFeedback({
+        txId: newTx.transaction_id,
+        isFraud: newTx.is_fraud,
+        manualOverride: Boolean(formData.is_fraud),
+        scoringResult,
+        scoringUnavailable,
+      });
+
+      // Reset form with valid defaults
+      const defaultUser = usersList.length > 0 ? usersList[0] : null;
       setFormData({
-        user_id: 1,
-        sender_account_id: `ACC-SND-${Math.floor(1000 + Math.random() * 9000)}`,
+        user_id: defaultUser ? defaultUser.user_id : 1,
+        sender_account_id: defaultUser?.account_id || `ACC-USR-1001`,
         destination_account_id: `ACC-DST-${Math.floor(1000 + Math.random() * 9000)}`,
-        step: 1,
+        step: stepNum + 1,
         transaction_type: 'TRANSFER',
         amount: 500.0,
         old_balance: 2000.0,
@@ -89,7 +211,8 @@ export function TransactionsPage({ onInspectCase }) {
         is_fraud: false,
       });
     } catch (err) {
-      alert(`Failed to create transaction: ${err.message}`);
+      // Readable backend errors shown in modal, preserved entered values
+      setModalError(err.message || 'Failed to save transaction');
     } finally {
       setIsSubmitting(false);
     }
@@ -150,6 +273,75 @@ export function TransactionsPage({ onInspectCase }) {
 
   return (
     <div className="space-y-4">
+      {/* REAL-TIME SUBMISSION FEEDBACK BANNER */}
+      {successFeedback && (
+        <div className="p-3 bg-[#132238] border border-cyan-500/50 rounded-lg text-xs text-slate-200 flex items-start justify-between gap-3 shadow-md">
+          <div className="flex items-start gap-2.5">
+            <span className="material-symbols-outlined text-cyan-400 text-lg shrink-0 mt-0.5">
+              check_circle
+            </span>
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-semibold text-white">
+                  Transaction <span className="font-mono text-cyan-400 font-bold">TX-{successFeedback.txId}</span> Saved Successfully!
+                </span>
+                {successFeedback.isFraud ? (
+                  <span className="px-1.5 py-0.5 rounded bg-red-950/70 border border-red-600/50 text-red-300 text-[10px] font-mono">
+                    {successFeedback.manualOverride ? 'Flagged Fraud (Manual Override)' : 'Flagged Fraud (ML Auto-Scored)'}
+                  </span>
+                ) : (
+                  <span className="px-1.5 py-0.5 rounded bg-emerald-950/70 border border-emerald-600/50 text-emerald-300 text-[10px] font-mono">
+                    Cleared Baseline (ML Auto-Scored)
+                  </span>
+                )}
+              </div>
+
+              {successFeedback.scoringResult ? (
+                <div className="text-[11px] text-slate-300 space-y-0.5">
+                  <p className="flex items-center gap-2 flex-wrap">
+                    <span className="font-medium text-slate-400">Real ML Model Score:</span>
+                    <span className="font-mono text-cyan-300 font-bold">
+                      {(successFeedback.scoringResult.fraud_probability * 100).toFixed(2)}% probability
+                    </span>
+                    <span className="text-slate-500">•</span>
+                    <span>Model: <code className="text-slate-200 font-mono">{successFeedback.scoringResult.model_id}</code></span>
+                    <span className="text-slate-500">•</span>
+                    <span>
+                      Verdict:{' '}
+                      <strong className={successFeedback.isFraud ? 'text-red-400' : 'text-emerald-400'}>
+                        {successFeedback.isFraud
+                          ? (successFeedback.manualOverride && !successFeedback.scoringResult.prediction
+                              ? 'FLAGGED (Manual Override)'
+                              : 'FLAGGED FRAUD')
+                          : 'CLEARED BASELINE'}
+                      </strong>
+                    </span>
+                  </p>
+                  {successFeedback.scoringResult.reasons?.length > 0 && (
+                    <p className="text-[10px] text-slate-400 font-sans italic">
+                      Reason: {successFeedback.scoringResult.reasons[0]}
+                    </p>
+                  )}
+                </div>
+              ) : successFeedback.scoringUnavailable ? (
+                <p className="text-[11px] text-amber-300/90 font-sans">
+                  Real-time ML scoring endpoint currently unavailable / pending. Record persisted in MySQL ledger without fabricated score.
+                </p>
+              ) : null}
+            </div>
+          </div>
+
+          <button
+            onClick={() => setSuccessFeedback(null)}
+            className="text-slate-400 hover:text-white p-1"
+            type="button"
+            title="Dismiss"
+          >
+            <span className="material-symbols-outlined text-base">close</span>
+          </button>
+        </div>
+      )}
+
       {/* PAGE HEADER BAR */}
       <section className="flex flex-col sm:flex-row items-start sm:items-center justify-between bg-[#131D31] px-4 py-3 rounded-lg border border-[#223049] gap-3 shadow-sm">
         <div>
@@ -370,11 +562,11 @@ export function TransactionsPage({ onInspectCase }) {
                     </p>
                   </div>
                   <div className="text-right font-mono">
-                    <span className="text-xl font-bold block leading-none">
-                      {selectedTx.is_fraud ? '0.84' : '0.12'}
+                    <span className="text-sm font-bold block leading-none">
+                      {selectedTx.is_fraud ? 'FLAGGED' : 'CLEARED'}
                     </span>
                     <span className="text-[9px] text-slate-400 uppercase font-sans">
-                      Fraud Score
+                      Status
                     </span>
                   </div>
                 </div>
@@ -491,20 +683,64 @@ export function TransactionsPage({ onInspectCase }) {
       {/* MODAL: ADD TEST TRANSACTION (POST /transactions/) */}
       <Modal
         isOpen={isAddModalOpen}
-        onClose={() => setIsAddModalOpen(false)}
+        onClose={() => {
+          setModalError(null);
+          setIsAddModalOpen(false);
+        }}
         title="Add Test Transaction"
         icon="add_card"
         maxWidth="max-w-md"
       >
         <form onSubmit={handleCreateSubmit} className="space-y-3 text-xs font-sans">
-          <div className="grid grid-cols-2 gap-2">
+          {modalError && (
+            <div className="p-2.5 rounded bg-red-950/70 border border-red-500/60 text-red-200 text-xs flex items-start gap-2">
+              <span className="material-symbols-outlined text-red-400 text-base shrink-0 mt-0.5">error</span>
+              <div className="space-y-0.5 min-w-0">
+                <span className="font-semibold block text-red-300">Transaction Save Error:</span>
+                <span className="text-[11px] leading-relaxed break-words">{modalError}</span>
+              </div>
+            </div>
+          )}
+
+          {usersList.length > 0 && (
             <div>
               <label className="text-[10px] uppercase text-slate-400 block mb-1 font-semibold">
-                Sender Account ID
+                Associated User (Sender Account Match)
               </label>
+              <select
+                value={formData.user_id}
+                onChange={(e) => {
+                  const selectedId = Number(e.target.value);
+                  const found = usersList.find((u) => u.user_id === selectedId);
+                  setFormData((prev) => ({
+                    ...prev,
+                    user_id: selectedId,
+                    sender_account_id: found ? found.account_id : prev.sender_account_id,
+                  }));
+                }}
+                className="w-full h-8 px-2 bg-[#0F172A] border border-[#223049] rounded text-xs text-white focus:border-cyan-400 font-sans"
+              >
+                {usersList.map((u) => (
+                  <option key={u.user_id} value={u.user_id}>
+                    User #{u.user_id} — {u.name || u.email || 'User'} ({u.account_id})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <div className="flex justify-between items-center mb-1">
+                <label className="text-[10px] uppercase text-slate-400 font-semibold">
+                  Sender Account ID
+                </label>
+                <span className="text-[9px] text-cyan-400 font-mono">User #{formData.user_id}</span>
+              </div>
               <input
                 type="text"
                 required
+                maxLength={50}
                 value={formData.sender_account_id}
                 onChange={(e) => setFormData({ ...formData, sender_account_id: e.target.value })}
                 className="w-full h-8 px-2.5 bg-[#0F172A] border border-[#223049] rounded text-xs text-white focus:border-cyan-400 font-mono"
@@ -517,6 +753,7 @@ export function TransactionsPage({ onInspectCase }) {
               <input
                 type="text"
                 required
+                maxLength={50}
                 value={formData.destination_account_id}
                 onChange={(e) => setFormData({ ...formData, destination_account_id: e.target.value })}
                 className="w-full h-8 px-2.5 bg-[#0F172A] border border-[#223049] rounded text-xs text-white focus:border-cyan-400 font-mono"
@@ -524,7 +761,7 @@ export function TransactionsPage({ onInspectCase }) {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-3 gap-2">
             <div>
               <label className="text-[10px] uppercase text-slate-400 block mb-1 font-semibold">
                 Amount (USD)
@@ -532,6 +769,7 @@ export function TransactionsPage({ onInspectCase }) {
               <input
                 type="number"
                 step="0.01"
+                min="0.01"
                 required
                 value={formData.amount}
                 onChange={(e) => setFormData({ ...formData, amount: parseFloat(e.target.value) || 0 })}
@@ -540,7 +778,7 @@ export function TransactionsPage({ onInspectCase }) {
             </div>
             <div>
               <label className="text-[10px] uppercase text-slate-400 block mb-1 font-semibold">
-                Transaction Type
+                Type
               </label>
               <select
                 value={formData.transaction_type}
@@ -554,6 +792,20 @@ export function TransactionsPage({ onInspectCase }) {
                 <option value="CASH_IN">CASH_IN</option>
               </select>
             </div>
+            <div>
+              <label className="text-[10px] uppercase text-slate-400 block mb-1 font-semibold">
+                Step (Hour)
+              </label>
+              <input
+                type="number"
+                step="1"
+                min="0"
+                required
+                value={formData.step}
+                onChange={(e) => setFormData({ ...formData, step: parseInt(e.target.value, 10) || 0 })}
+                className="w-full h-8 px-2 bg-[#0F172A] border border-[#223049] rounded text-xs text-white focus:border-cyan-400 font-mono"
+              />
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-2">
@@ -564,8 +816,9 @@ export function TransactionsPage({ onInspectCase }) {
               <input
                 type="number"
                 step="0.01"
+                min="0"
                 value={formData.old_balance}
-                onChange={(e) => setFormData({ ...formData, old_balance: parseFloat(e.target.value) || 0 })}
+                onChange={(e) => setFormData({ ...formData, old_balance: e.target.value === '' ? '' : parseFloat(e.target.value) || 0 })}
                 className="w-full h-8 px-2 bg-[#0F172A] border border-[#223049] rounded text-xs text-white focus:border-cyan-400 font-mono"
               />
             </div>
@@ -576,8 +829,9 @@ export function TransactionsPage({ onInspectCase }) {
               <input
                 type="number"
                 step="0.01"
+                min="0"
                 value={formData.new_balance}
-                onChange={(e) => setFormData({ ...formData, new_balance: parseFloat(e.target.value) || 0 })}
+                onChange={(e) => setFormData({ ...formData, new_balance: e.target.value === '' ? '' : parseFloat(e.target.value) || 0 })}
                 className="w-full h-8 px-2 bg-[#0F172A] border border-[#223049] rounded text-xs text-white focus:border-cyan-400 font-mono"
               />
             </div>
@@ -599,7 +853,10 @@ export function TransactionsPage({ onInspectCase }) {
           <div className="flex items-center justify-end gap-2 border-t border-[#1E293B] pt-3 mt-2">
             <button
               type="button"
-              onClick={() => setIsAddModalOpen(false)}
+              onClick={() => {
+                setModalError(null);
+                setIsAddModalOpen(false);
+              }}
               className="h-7 px-3 rounded bg-[#0F172A] border border-[#223049] text-slate-300 text-xs hover:bg-[#1A263D] transition-colors"
             >
               Cancel
@@ -607,9 +864,20 @@ export function TransactionsPage({ onInspectCase }) {
             <button
               type="submit"
               disabled={isSubmitting}
-              className="h-7 px-3.5 rounded bg-cyan-500 text-[#041E26] font-semibold text-xs hover:bg-cyan-400 transition-colors"
+              className={`h-7 px-3.5 rounded font-semibold text-xs transition-colors flex items-center gap-1.5 ${
+                isSubmitting
+                  ? 'bg-cyan-800 text-slate-300 cursor-not-allowed'
+                  : 'bg-cyan-500 text-[#041E26] hover:bg-cyan-400'
+              }`}
             >
-              {isSubmitting ? 'Saving...' : 'Save & Score Transaction'}
+              {isSubmitting ? (
+                <>
+                  <span className="w-3 h-3 rounded-full border-2 border-slate-300 border-t-transparent animate-spin"></span>
+                  <span>Saving & Scoring...</span>
+                </>
+              ) : (
+                <span>Save & Score Transaction</span>
+              )}
             </button>
           </div>
         </form>
