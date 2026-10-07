@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { api } from './services/api';
 import Shell from './components/Layout/Shell';
 import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
@@ -16,6 +17,20 @@ function AppContent() {
   const [currentTab, setCurrentTab] = useState('dashboard');
   const [selectedCaseId, setSelectedCaseId] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [transactionCounts, setTransactionCounts] = useState(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    api.getTransactionSummary()
+      .then((counts) => {
+        if (isMounted) setTransactionCounts(counts);
+      })
+      .catch((err) => console.error('Failed to load transaction totals:', err));
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   if (!user || !user.isAuthenticated) {
     return <LoginPage onLoginSuccess={() => setCurrentTab('dashboard')} />;
@@ -28,6 +43,22 @@ function AppContent() {
 
   const handleRefreshData = () => {
     setRefreshKey((k) => k + 1);
+  };
+
+  const handleTransactionCreated = (transaction, scoringResult) => {
+    setTransactionCounts((current) => current && ({
+      transaction_count: current.transaction_count + 1,
+      fraud_prediction_count: current.fraud_prediction_count
+        + Number(Boolean(transaction.is_fraud))
+        + Number(Boolean(scoringResult?.prediction)),
+    }));
+  };
+
+  const handleTransactionDeleted = () => {
+    setTransactionCounts((current) => current && ({
+      ...current,
+      transaction_count: Math.max(0, current.transaction_count - 1),
+    }));
   };
 
   const getPageTitle = () => {
@@ -63,6 +94,7 @@ function AppContent() {
       {currentTab === 'dashboard' && (
         <DashboardPage
           key={`dash-${refreshKey}`}
+          transactionCounts={transactionCounts}
           onInspectCase={handleInspectCase}
           onNavigateTransactions={() => setCurrentTab('transactions')}
           onNavigateDrift={() => setCurrentTab('drift-monitoring')}
@@ -73,6 +105,8 @@ function AppContent() {
         <TransactionsPage
           key={`tx-${refreshKey}`}
           onInspectCase={handleInspectCase}
+          onTransactionCreated={handleTransactionCreated}
+          onTransactionDeleted={handleTransactionDeleted}
         />
       )}
 

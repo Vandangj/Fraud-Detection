@@ -1,5 +1,6 @@
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 import pandas as pd
@@ -116,6 +117,31 @@ def create_transaction(
         print(f"[DB Fraud Prediction Save Warning] {e}")
 
     return db_tx
+
+
+@router.get(
+    "/summary",
+    summary="Get transaction and fraud-prediction totals",
+    description="Returns exact transaction and positive fraud-prediction counts for the overview.",
+)
+def get_transaction_summary(db: Session = Depends(get_db)):
+    try:
+        transaction_count = db.query(func.count(models.Transaction.transaction_id)).scalar() or 0
+        fraud_prediction_count = (
+            db.query(func.count(models.Fraud_prediction.prediction_id))
+            .filter(models.Fraud_prediction.prediction.is_(True))
+            .scalar()
+            or 0
+        )
+        return {
+            "transaction_count": transaction_count,
+            "fraud_prediction_count": fraud_prediction_count,
+        }
+    except SQLAlchemyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Transaction totals could not be retrieved because the database is unavailable.",
+        ) from exc
 
 
 @router.get(

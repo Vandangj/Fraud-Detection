@@ -3,7 +3,7 @@ import { api } from '../services/api';
 import MetricCard from '../components/Common/MetricCard';
 import StatusBadge from '../components/Common/StatusBadge';
 
-export function DashboardPage({ onInspectCase, onNavigateTransactions, onNavigateDrift }) {
+export function DashboardPage({ transactionCounts, onInspectCase, onNavigateTransactions, onNavigateDrift }) {
   const [transactions, setTransactions] = useState([]);
   const [models, setModels] = useState([]);
   const [driftReports, setDriftReports] = useState([]);
@@ -39,10 +39,11 @@ export function DashboardPage({ onInspectCase, onNavigateTransactions, onNavigat
   };
 
   // Metrics computation
-  const totalTxCount = transactions.length > 0 ? transactions.length : 14820;
-  const flaggedTxs = transactions.filter((t) => t.is_fraud);
-  const flaggedCount = transactions.length > 0 ? flaggedTxs.length : 184;
-  const fraudRate = ((flaggedCount / totalTxCount) * 100).toFixed(2);
+  const totalTxCount = transactionCounts?.transaction_count;
+  const flaggedCount = transactionCounts?.fraud_prediction_count;
+  const fraudRate = totalTxCount
+    ? ((flaggedCount / totalTxCount) * 100).toFixed(3)
+    : null;
 
   // Active model
   const activeModel = models[0] || {
@@ -85,34 +86,34 @@ export function DashboardPage({ onInspectCase, onNavigateTransactions, onNavigat
         {/* Total Transactions */}
         <MetricCard
           title="Total Transactions"
-          value={totalTxCount.toLocaleString()}
-          subtext="Test Dataset"
+          value={totalTxCount?.toLocaleString() ?? '—'}
+          subtext="All database records"
           icon="receipt_long"
-          footerLabel="Validation Cohort"
-          footerValue="80/20 Split"
+          footerLabel="Latest records shown below"
+          footerValue={transactions.length.toLocaleString()}
         />
 
         {/* Flagged Suspicious */}
         <MetricCard
           title="Flagged Suspicious"
-          value={flaggedCount.toString()}
-          subtext={`${fraudRate}% of set`}
+          value={flaggedCount?.toLocaleString() ?? '—'}
+          subtext={fraudRate == null ? 'Fraud predictions' : `${fraudRate}% of transactions`}
           badgeText="Flagged"
           badgeVariant="danger"
           hoverColor="hover:border-red-900/50"
           footerLabel="Model Identified"
-          footerValue={`${flaggedCount} Transactions`}
+          footerValue={`${flaggedCount?.toLocaleString() ?? '—'} Predictions`}
         />
 
         {/* Fraud Rate */}
         <MetricCard
           title="Fraud Rate"
-          value={`${fraudRate}%`}
-          badgeText="In Bounds"
+          value={fraudRate == null ? '—' : `${fraudRate}%`}
+          badgeText={fraudRate == null ? 'Loading' : 'From database'}
           badgeVariant="warning"
           hoverColor="hover:border-amber-900/50"
-          footerLabel="Sample Variance"
-          footerValue="+0.04%"
+          footerLabel="Positive predictions"
+          footerValue={flaggedCount?.toLocaleString() ?? '—'}
         />
 
         {/* Model Performance */}

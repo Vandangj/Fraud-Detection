@@ -96,6 +96,9 @@ export const api = {
   getTransactions: (skip = 0, limit = 100) => 
     apiRequest(`/transactions/?skip=${skip}&limit=${limit}`),
 
+  getTransactionSummary: () =>
+    apiRequest('/transactions/summary'),
+
   getTransaction: (txId) => 
     apiRequest(`/transactions/${txId}`),
 

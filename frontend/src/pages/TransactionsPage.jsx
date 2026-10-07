@@ -4,7 +4,7 @@ import StatusBadge from '../components/Common/StatusBadge';
 import Modal from '../components/Common/Modal';
 import PendingNotice from '../components/Common/PendingNotice';
 
-export function TransactionsPage({ onInspectCase }) {
+export function TransactionsPage({ onInspectCase, onTransactionCreated, onTransactionDeleted }) {
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -141,6 +141,7 @@ export function TransactionsPage({ onInspectCase }) {
 
       // 1. POST the transaction using the existing backend
       let newTx = await api.createTransaction(payload);
+      const initiallyPersistedTransaction = newTx;
 
       // 2. Real scoring endpoint call if available
       let scoringResult = null;
@@ -185,6 +186,7 @@ export function TransactionsPage({ onInspectCase }) {
 
       // 3. Update transaction state and UI
       setTransactions((prev) => [newTx, ...prev]);
+      onTransactionCreated?.(initiallyPersistedTransaction, scoringResult);
       setSelectedTx(newTx);
       setIsAddModalOpen(false);
 
@@ -244,6 +246,7 @@ export function TransactionsPage({ onInspectCase }) {
     try {
       await api.deleteTransaction(txId);
       setTransactions((prev) => prev.filter((t) => t.transaction_id !== txId));
+      onTransactionDeleted?.();
       if (selectedTx?.transaction_id === txId) {
         setSelectedTx(null);
       }

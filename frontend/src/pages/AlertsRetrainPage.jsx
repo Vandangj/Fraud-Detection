@@ -3,6 +3,7 @@ import { api } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import StatusBadge from '../components/Common/StatusBadge';
 import Modal from '../components/Common/Modal';
+import PendingNotice from '../components/Common/PendingNotice';
 
 export function AlertsRetrainPage({ onNavigateTransactions, onNavigateDrift }) {
   const { isAdmin } = useAuth();
