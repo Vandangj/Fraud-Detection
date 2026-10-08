@@ -90,16 +90,50 @@ export function ModelHealthPage({ onTriggerRetrain }) {
   const activeModel = models.find((m) => m.model_id === selectedModelId) || models[0] || {};
   const activeComp = comparisons.find((c) => c.model_id === selectedModelId) || {};
 
+  const normalizeMetric = (value) => {
+    const numericValue = Number(value);
+    if (!Number.isFinite(numericValue)) return null;
+    return numericValue > 1 && numericValue <= 100 ? numericValue / 100 : numericValue;
+  };
+  const formatPercent = (value) => {
+    const normalized = normalizeMetric(value);
+    return normalized == null ? '—' : `${(normalized * 100).toFixed(2)}%`;
+  };
+  const formatScore = (value) => {
+    const normalized = normalizeMetric(value);
+    return normalized == null ? '—' : normalized.toFixed(4);
+  };
+
+  const confusionMatrix = activeComp.confusion_matrix;
+  const hasConfusionMatrix = Array.isArray(confusionMatrix)
+    && confusionMatrix.length === 2
+    && confusionMatrix.every((row) => Array.isArray(row) && row.length === 2);
+  const trueNegatives = hasConfusionMatrix ? Number(confusionMatrix[0][0]) : null;
+  const falsePositives = hasConfusionMatrix ? Number(confusionMatrix[0][1]) : null;
+  const falseNegatives = hasConfusionMatrix ? Number(confusionMatrix[1][0]) : null;
+  const truePositives = hasConfusionMatrix ? Number(confusionMatrix[1][1]) : null;
+  const precisionValue = hasConfusionMatrix
+    ? truePositives / (truePositives + falsePositives)
+    : activeComp.model_precision ?? activeModel.model_precision;
+  const recallValue = hasConfusionMatrix
+    ? truePositives / (truePositives + falseNegatives)
+    : activeComp.model_recall ?? activeModel.model_recall;
+  const f1Value = hasConfusionMatrix
+    ? (2 * truePositives) / (2 * truePositives + falsePositives + falseNegatives)
+    : activeComp.model_f1_score ?? activeModel.model_f1_score;
+  const specificityValue = hasConfusionMatrix
+    ? trueNegatives / (trueNegatives + falsePositives)
+    : null;
+  const confusionTotal = hasConfusionMatrix
+    ? trueNegatives + falsePositives + falseNegatives + truePositives
+    : null;
+  const precisionMeetsTarget = precisionValue != null && normalizeMetric(precisionValue) >= 0.90;
+  const recallMeetsTarget = recallValue != null && normalizeMetric(recallValue) >= 0.85;
+
   // Best performers
   const bestF1 = comparisons.reduce((max, c) => (c.model_f1_score > (max?.model_f1_score || 0) ? c : max), null);
   const bestAUC = comparisons.reduce((max, c) => (c.model_roc_auc > (max?.model_roc_auc || 0) ? c : max), null);
   const fastestModel = comparisons.reduce((min, c) => (c.latency_ms < (min?.latency_ms || 999) ? c : min), null);
-
-  // Dynamic values based on threshold slider
-  const rawPrec = (activeModel.model_precision ? Number(activeModel.model_precision) : 0.99) * 100;
-  const rawRec = (activeModel.model_recall ? Number(activeModel.model_recall) : 0.99) * 100;
-  const dynamicPrecision = Math.min(100, Math.max(10, rawPrec + (threshold - 0.3) * 6)).toFixed(1);
-  const dynamicRecall = Math.min(100, Math.max(10, rawRec - (threshold - 0.3) * 8)).toFixed(1);
 
   // Multi-model color mapping
   const modelColors = {
@@ -157,9 +191,9 @@ export function ModelHealthPage({ onTriggerRetrain }) {
           </div>
           <div className="truncate">
             <div className="text-[10px] uppercase font-semibold text-slate-400">Highest F1-Score Champion</div>
-            <div className="text-sm font-bold text-white truncate">{bestF1?.model_name || 'Random Forest'}</div>
+            <div className="text-sm font-bold text-white truncate">{bestF1?.model_name || '—'}</div>
             <div className="text-xs font-mono text-cyan-300 font-bold">
-              F1: {bestF1 ? (bestF1.model_f1_score >= 1 ? '0.9970' : bestF1.model_f1_score) : '0.9970'}
+              F1: {formatScore(bestF1?.model_f1_score)}
               <span className="text-slate-500 text-[10px] ml-1.5 font-sans">({bestF1?.model_id})</span>
             </div>
           </div>
@@ -171,9 +205,9 @@ export function ModelHealthPage({ onTriggerRetrain }) {
           </div>
           <div className="truncate">
             <div className="text-[10px] uppercase font-semibold text-slate-400">Fastest Inference Latency</div>
-            <div className="text-sm font-bold text-white truncate">{fastestModel?.model_name || 'XGBoost'}</div>
+            <div className="text-sm font-bold text-white truncate">{fastestModel?.model_name || '—'}</div>
             <div className="text-xs font-mono text-emerald-300 font-bold">
-              {fastestModel?.latency_ms || 0.0008} ms/query
+              {fastestModel?.latency_ms != null ? `${fastestModel.latency_ms} ms/query` : 'Unavailable'}
               <span className="text-slate-500 text-[10px] ml-1.5 font-sans">({fastestModel?.model_id})</span>
             </div>
           </div>
@@ -185,9 +219,9 @@ export function ModelHealthPage({ onTriggerRetrain }) {
           </div>
           <div className="truncate">
             <div className="text-[10px] uppercase font-semibold text-slate-400">Peak Discrimination (ROC-AUC)</div>
-            <div className="text-sm font-bold text-white truncate">{bestAUC?.model_name || 'LightGBM'}</div>
+            <div className="text-sm font-bold text-white truncate">{bestAUC?.model_name || '—'}</div>
             <div className="text-xs font-mono text-purple-300 font-bold">
-              AUC: {bestAUC ? (bestAUC.model_roc_auc >= 1 ? '0.9994' : bestAUC.model_roc_auc) : '0.9994'}
+              AUC: {formatScore(bestAUC?.model_roc_auc)}
               <span className="text-slate-500 text-[10px] ml-1.5 font-sans">({bestAUC?.model_id})</span>
             </div>
           </div>
@@ -261,25 +295,25 @@ export function ModelHealthPage({ onTriggerRetrain }) {
                       />
                     </td>
                     <td className="px-3 py-2.5 text-right text-slate-200">
-                      {m.model_accuracy != null ? (Number(m.model_accuracy) >= 1 ? '99.9%' : `${(Number(m.model_accuracy) * 100).toFixed(2)}%`) : '99.9%'}
+                      {formatPercent(m.model_accuracy)}
                     </td>
                     <td className="px-3 py-2.5 text-right text-emerald-400">
-                      {m.model_precision != null ? (Number(m.model_precision) >= 1 ? '99.7%' : `${(Number(m.model_precision) * 100).toFixed(2)}%`) : '99.5%'}
+                      {formatPercent(m.model_precision)}
                     </td>
                     <td className="px-3 py-2.5 text-right text-emerald-400">
-                      {m.model_recall != null ? (Number(m.model_recall) >= 1 ? '99.6%' : `${(Number(m.model_recall) * 100).toFixed(2)}%`) : '99.6%'}
+                      {formatPercent(m.model_recall)}
                     </td>
                     <td className="px-3 py-2.5 text-right text-cyan-300 font-bold">
-                      {m.model_f1_score != null ? (Number(m.model_f1_score) >= 1 ? '0.9970' : Number(m.model_f1_score).toFixed(4)) : '0.9960'}
+                      {formatScore(m.model_f1_score)}
                     </td>
                     <td className="px-3 py-2.5 text-right text-purple-300 font-bold">
-                      {m.model_roc_auc != null ? (Number(m.model_roc_auc) >= 1 ? '0.9994' : Number(m.model_roc_auc).toFixed(4)) : '0.9990'}
+                      {formatScore(m.model_roc_auc)}
                     </td>
                     <td className="px-3 py-2.5 text-right text-slate-400 text-[11px]">
-                      {m.latency_ms ? `${m.latency_ms} ms` : '< 0.01 ms'}
+                      {m.latency_ms != null ? `${m.latency_ms} ms` : '—'}
                     </td>
                     <td className="px-3 py-2.5 text-right text-slate-400 text-[11px]">
-                      {m.training_time_sec ? `${m.training_time_sec}s` : '1.5s'}
+                      {m.training_time_sec != null ? `${m.training_time_sec}s` : '—'}
                     </td>
                     <td className="px-4 py-2.5 text-center font-sans">
                       <button
@@ -313,12 +347,14 @@ export function ModelHealthPage({ onTriggerRetrain }) {
             <span className="material-symbols-outlined text-emerald-400 text-sm">check_circle</span>
           </div>
           <div className="flex items-baseline justify-between py-0.5">
-            <span className="text-2xl font-bold text-white tracking-tight">{dynamicPrecision}%</span>
-            <span className="text-[11px] text-emerald-400 font-semibold">+1.4%</span>
+            <span className="text-2xl font-bold text-white tracking-tight">{formatPercent(precisionValue)}</span>
+            <span className="text-[11px] text-slate-400 font-semibold">Selected model</span>
           </div>
           <div className="mt-2.5 pt-2 border-t border-[#1E293B] flex items-center justify-between text-[11px] text-slate-400">
             <span>Target: &gt;90%</span>
-            <span className="px-1.5 py-0.2 rounded bg-emerald-950/60 text-emerald-400 font-medium text-[10px]">Met</span>
+            <span className={`px-1.5 py-0.2 rounded font-medium text-[10px] ${precisionMeetsTarget ? 'bg-emerald-950/60 text-emerald-400' : 'bg-red-950/60 text-red-300'}`}>
+              {precisionValue == null ? 'Unavailable' : precisionMeetsTarget ? 'Met' : 'Below target'}
+            </span>
           </div>
         </div>
 
@@ -328,12 +364,14 @@ export function ModelHealthPage({ onTriggerRetrain }) {
             <span className="material-symbols-outlined text-emerald-400 text-sm">check_circle</span>
           </div>
           <div className="flex items-baseline justify-between py-0.5">
-            <span className="text-2xl font-bold text-white tracking-tight">{dynamicRecall}%</span>
-            <span className="text-[11px] text-emerald-400 font-semibold">+2.1%</span>
+            <span className="text-2xl font-bold text-white tracking-tight">{formatPercent(recallValue)}</span>
+            <span className="text-[11px] text-slate-400 font-semibold">Selected model</span>
           </div>
           <div className="mt-2.5 pt-2 border-t border-[#1E293B] flex items-center justify-between text-[11px] text-slate-400">
             <span>Target: &gt;85%</span>
-            <span className="px-1.5 py-0.2 rounded bg-emerald-950/60 text-emerald-400 font-medium text-[10px]">Met</span>
+            <span className={`px-1.5 py-0.2 rounded font-medium text-[10px] ${recallMeetsTarget ? 'bg-emerald-950/60 text-emerald-400' : 'bg-red-950/60 text-red-300'}`}>
+              {recallValue == null ? 'Unavailable' : recallMeetsTarget ? 'Met' : 'Below target'}
+            </span>
           </div>
         </div>
 
@@ -344,13 +382,13 @@ export function ModelHealthPage({ onTriggerRetrain }) {
           </div>
           <div className="flex items-baseline justify-between py-0.5">
             <span className="text-2xl font-bold text-white tracking-tight">
-              {activeModel.model_f1_score != null ? (Number(activeModel.model_f1_score) >= 1 ? '0.997' : activeModel.model_f1_score) : '0.996'}
+              {formatScore(f1Value)}
             </span>
-            <span className="text-[11px] text-emerald-400 font-semibold">+0.018</span>
+            <span className="text-[11px] text-slate-400 font-semibold">Selected model</span>
           </div>
           <div className="mt-2.5 pt-2 border-t border-[#1E293B] flex items-center justify-between text-[11px] text-slate-400">
             <span>Harmonic Mean</span>
-            <span className="px-1.5 py-0.2 rounded bg-emerald-950/60 text-emerald-400 font-medium text-[10px]">Met</span>
+            <span className="px-1.5 py-0.2 rounded bg-[#0F172A] text-slate-300 font-medium text-[10px]">Selected model</span>
           </div>
         </div>
 
@@ -361,13 +399,13 @@ export function ModelHealthPage({ onTriggerRetrain }) {
           </div>
           <div className="flex items-baseline justify-between py-0.5">
             <span className="text-2xl font-bold text-white tracking-tight">
-              {activeModel.model_roc_auc != null ? (Number(activeModel.model_roc_auc) >= 1 ? '0.999' : activeModel.model_roc_auc) : '0.999'}
+              {formatScore(activeComp.model_roc_auc ?? activeModel.model_roc_auc)}
             </span>
-            <span className="text-[11px] text-purple-400 font-semibold">+0.005</span>
+            <span className="text-[11px] text-slate-400 font-semibold">Selected model</span>
           </div>
           <div className="mt-2.5 pt-2 border-t border-[#1E293B] flex items-center justify-between text-[11px] text-slate-400">
             <span>Separation Area</span>
-            <span className="px-1.5 py-0.2 rounded bg-emerald-950/60 text-emerald-400 font-medium text-[10px]">High</span>
+            <span className="px-1.5 py-0.2 rounded bg-[#0F172A] text-slate-300 font-medium text-[10px]">Selected model</span>
           </div>
         </div>
 
@@ -378,13 +416,13 @@ export function ModelHealthPage({ onTriggerRetrain }) {
           </div>
           <div className="flex items-baseline justify-between py-0.5">
             <span className="text-2xl font-bold text-white tracking-tight">
-              {activeModel.model_accuracy != null ? (Number(activeModel.model_accuracy) >= 1 ? '99.9%' : `${(Number(activeModel.model_accuracy) * 100).toFixed(1)}%`) : '99.9%'}
+              {formatPercent(activeComp.model_accuracy ?? activeModel.model_accuracy)}
             </span>
-            <span className="text-[11px] text-slate-400 font-semibold">Overall</span>
+            <span className="text-[11px] text-slate-400 font-semibold">Selected model</span>
           </div>
           <div className="mt-2.5 pt-2 border-t border-[#1E293B] flex items-center justify-between text-[11px] text-slate-400">
             <span>All Classes</span>
-            <span className="px-1.5 py-0.2 rounded bg-emerald-950/60 text-emerald-400 font-medium text-[10px]">Optimal</span>
+            <span className="px-1.5 py-0.2 rounded bg-[#0F172A] text-slate-300 font-medium text-[10px]">Reported</span>
           </div>
         </div>
 
@@ -395,7 +433,7 @@ export function ModelHealthPage({ onTriggerRetrain }) {
           </div>
           <div className="flex items-baseline justify-between py-0.5">
             <span className="text-2xl font-bold text-white tracking-tight">
-              {activeComp.latency_ms || 0.002}
+              {activeComp.latency_ms != null ? activeComp.latency_ms : '—'}
             </span>
             <span className="text-[11px] text-cyan-400 font-semibold">ms</span>
           </div>
@@ -419,7 +457,7 @@ export function ModelHealthPage({ onTriggerRetrain }) {
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 mt-0.5">
-                Multi-algorithm discrimination trajectories across discrimination thresholds
+                Illustrative curves; moving the cutoff marker does not rerun model inference.
               </p>
             </div>
 
@@ -537,7 +575,7 @@ export function ModelHealthPage({ onTriggerRetrain }) {
           <div className="flex flex-col gap-2 pt-2 border-t border-[#1E293B]">
             <div className="flex items-center gap-3 bg-[#0F172A] px-3.5 py-2 rounded-lg border border-[#1E293B]">
               <span className="text-xs font-medium text-slate-300 whitespace-nowrap">
-                Decision Cutoff Slider:
+                Visual Cutoff Marker:
               </span>
               <input
                 type="range"
@@ -562,7 +600,9 @@ export function ModelHealthPage({ onTriggerRetrain }) {
               <div>
                 <h2 className="text-sm font-bold text-white">Confusion Matrix Breakdown</h2>
                 <p className="text-[11px] text-slate-400 mt-0.5">
-                  Holdout validation test split (N = 17,643)
+                  {hasConfusionMatrix
+                    ? `Benchmark confusion matrix (N = ${confusionTotal.toLocaleString()})`
+                    : 'No confusion matrix reported for this model'}
                 </p>
               </div>
               <span className="text-[11px] font-mono bg-[#0F172A] text-cyan-300 px-2.5 py-1 rounded border border-[#1E293B] font-semibold">
@@ -576,7 +616,7 @@ export function ModelHealthPage({ onTriggerRetrain }) {
                   <span>True Positives (TP)</span>
                   <span className="material-symbols-outlined text-sm">check_circle</span>
                 </div>
-                <div className="text-2xl font-bold text-white my-1 font-mono">1,637</div>
+                <div className="text-2xl font-bold text-white my-1 font-mono">{hasConfusionMatrix ? truePositives.toLocaleString() : '—'}</div>
                 <div className="text-[10px] text-emerald-300">Detected Fraudulent Cases</div>
               </div>
 
@@ -585,7 +625,7 @@ export function ModelHealthPage({ onTriggerRetrain }) {
                   <span>False Positives (FP)</span>
                   <span className="material-symbols-outlined text-sm">error_outline</span>
                 </div>
-                <div className="text-2xl font-bold text-white my-1 font-mono">4</div>
+                <div className="text-2xl font-bold text-white my-1 font-mono">{hasConfusionMatrix ? falsePositives.toLocaleString() : '—'}</div>
                 <div className="text-[10px] text-amber-300">False Alarms (Legit Blocked)</div>
               </div>
 
@@ -594,7 +634,7 @@ export function ModelHealthPage({ onTriggerRetrain }) {
                   <span>False Negatives (FN)</span>
                   <span className="material-symbols-outlined text-sm">warning</span>
                 </div>
-                <div className="text-2xl font-bold text-white my-1 font-mono">6</div>
+                <div className="text-2xl font-bold text-white my-1 font-mono">{hasConfusionMatrix ? falseNegatives.toLocaleString() : '—'}</div>
                 <div className="text-[10px] text-red-300">Missed Fraud Transactions</div>
               </div>
 
@@ -603,7 +643,7 @@ export function ModelHealthPage({ onTriggerRetrain }) {
                   <span>True Negatives (TN)</span>
                   <span className="material-symbols-outlined text-sm">verified</span>
                 </div>
-                <div className="text-2xl font-bold text-white my-1 font-mono">15,996</div>
+                <div className="text-2xl font-bold text-white my-1 font-mono">{hasConfusionMatrix ? trueNegatives.toLocaleString() : '—'}</div>
                 <div className="text-[10px] text-emerald-300">Legitimate Cleared Accurately</div>
               </div>
             </div>
@@ -617,20 +657,20 @@ export function ModelHealthPage({ onTriggerRetrain }) {
               <div>
                 <span className="text-[10px] text-slate-400 block">Precision</span>
                 <span className="text-sm font-bold text-emerald-400 font-mono">
-                  {dynamicPrecision}%
+                  {formatPercent(precisionValue)}
                 </span>
               </div>
               <div className="h-6 w-px bg-[#1E293B]"></div>
               <div>
                 <span className="text-[10px] text-slate-400 block">Recall</span>
                 <span className="text-sm font-bold text-cyan-400 font-mono">
-                  {dynamicRecall}%
+                  {formatPercent(recallValue)}
                 </span>
               </div>
               <div className="h-6 w-px bg-[#1E293B]"></div>
               <div>
                 <span className="text-[10px] text-slate-400 block">Specificity</span>
-                <span className="text-sm font-bold text-slate-200 font-mono">99.97%</span>
+                <span className="text-sm font-bold text-slate-200 font-mono">{formatPercent(specificityValue)}</span>
               </div>
             </div>
           </div>
