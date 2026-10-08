@@ -51,15 +51,6 @@ Before running the project, make sure you have:
 - Python 3.10+
 - Node.js 18+
 - MySQL Server running locally or remotely
-- a `.env` file with a valid `DATABASE_URL`
-
-## Environment Setup
-
-Create a `.env` file in the project root with a MySQL connection string like:
-
-```env
-DATABASE_URL=mysql+pymysql://username:password@localhost:3306/fraud_detection
-```
 
 If your database does not exist yet, create it first:
 
