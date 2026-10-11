@@ -6,6 +6,7 @@ export function DatabaseTablesPage() {
   const [tablesList, setTablesList] = useState([]);
   const [selectedTable, setSelectedTable] = useState('frauds');
   const [tableData, setTableData] = useState(null);
+  const [modelComparisons, setModelComparisons] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
@@ -41,6 +42,26 @@ export function DatabaseTablesPage() {
       loadTableData();
     }
   }, [selectedTable, page, pageSize, sortBy, sortOrder, searchTerm, filterColumn, filterOperator, filterValue]);
+
+  useEffect(() => {
+    if (selectedTable !== 'models') {
+      setModelComparisons([]);
+      return;
+    }
+
+    let isCurrent = true;
+    api.getModelsComparison()
+      .then((data) => {
+        if (isCurrent && Array.isArray(data)) {
+          setModelComparisons(data);
+        }
+      })
+      .catch((err) => console.error('Failed to load model comparison metrics:', err));
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [selectedTable]);
 
   const loadTables = async () => {
     try {
@@ -212,6 +233,11 @@ export function DatabaseTablesPage() {
     setCopiedNotification(true);
     setTimeout(() => setCopiedNotification(false), 2000);
   };
+
+  const modelComparisonById = useMemo(
+    () => new Map(modelComparisons.map((model) => [model.model_id, model])),
+    [modelComparisons]
+  );
 
   // Table presets by table
   const tablePresets = {
@@ -700,19 +726,32 @@ export function DatabaseTablesPage() {
                 </tr>
               ) : (
                 tableData?.rows?.map((row, rowIdx) => {
+                  const comparison = selectedTable === 'models'
+                    ? modelComparisonById.get(row.model_id)
+                    : null;
+                  const displayRow = comparison
+                    ? {
+                        ...row,
+                        model_accuracy: comparison.model_accuracy,
+                        model_precision: comparison.model_precision,
+                        model_recall: comparison.model_recall,
+                        model_f1_score: comparison.model_f1_score,
+                        model_roc_auc: comparison.model_roc_auc,
+                      }
+                    : row;
                   const rowNum = (page - 1) * pageSize + rowIdx + 1;
                   return (
                     <tr
                       key={rowIdx}
                       className="hover:bg-[#152238]/60 transition-colors group cursor-pointer"
-                      onClick={() => setInspectRow(row)}
+                      onClick={() => setInspectRow(displayRow)}
                     >
                       <td className="px-3 py-2 text-center text-[10px] text-slate-500 font-sans">
                         {rowNum}
                       </td>
 
                       {activeCols.map((colName) => {
-                        const val = row[colName];
+                        const val = displayRow[colName];
                         let renderedVal = null;
 
                         if (val === null || val === undefined) {
@@ -779,7 +818,7 @@ export function DatabaseTablesPage() {
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            setInspectRow(row);
+                            setInspectRow(displayRow);
                           }}
                           className="px-2 py-0.5 rounded bg-[#0F172A] hover:bg-cyan-950 hover:text-cyan-300 text-slate-400 text-[10px] border border-[#1E293B] transition-colors"
                         >

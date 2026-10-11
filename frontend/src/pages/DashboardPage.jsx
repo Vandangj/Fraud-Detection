@@ -18,7 +18,7 @@ export function DashboardPage({ transactionCounts, onInspectCase, onNavigateTran
     try {
       const [txRes, modelRes, driftRes] = await Promise.allSettled([
         api.getTransactions(0, 50),
-        api.getModels(),
+        api.getModelsComparison(),
         api.getDriftReports(),
       ]);
 
@@ -46,14 +46,20 @@ export function DashboardPage({ transactionCounts, onInspectCase, onNavigateTran
     : null;
 
   // Active model
-  const activeModel = models[0] || {
-    model_name: 'Random Forest (SMOTE)',
-    model_precision: 92.4,
-    model_recall: 88.1,
-    model_f1_score: 0.902,
-    model_roc_auc: 0.942,
+  const activeModel = models.find((model) => model.model_id === 'rf-balanced-v1') || models[0] || {};
+  const normalizeModelMetric = (value) => {
+    const numericValue = Number(value);
+    if (!Number.isFinite(numericValue)) return null;
+    return numericValue > 1 && numericValue <= 100 ? numericValue / 100 : numericValue;
   };
-
+  const formatModelPercent = (value) => {
+    const normalized = normalizeModelMetric(value);
+    return normalized == null ? '—' : `${(normalized * 100).toFixed(2)}%`;
+  };
+  const formatModelScore = (value) => {
+    const normalized = normalizeModelMetric(value);
+    return normalized == null ? '—' : normalized.toFixed(4);
+  };
   return (
     <div className="space-y-6">
       {/* Live Stream Status Strip */}
@@ -127,28 +133,30 @@ export function DashboardPage({ transactionCounts, onInspectCase, onNavigateTran
           </div>
           <div className="my-2 flex items-baseline justify-between">
             <span className="text-sm font-semibold text-slate-100 truncate font-sans">
-              {activeModel.model_name || 'Scikit-Learn v1.3'}
+              {activeModel.model_name || '—'}
             </span>
             <span className="text-[11px] text-emerald-400 bg-[#0B111E] px-1.5 py-0.5 rounded border border-[#1E293B] font-sans">
-              PSI 0.082 Stable
+              ROC-AUC {formatModelScore(activeModel.model_roc_auc)}
             </span>
           </div>
           <div className="grid grid-cols-3 gap-1.5 border-t border-[#1E293B] pt-2 text-center font-sans">
             <div className="bg-[#0B111E] py-1 rounded border border-[#1E293B]">
               <div className="text-[9px] uppercase text-slate-400 font-sans">Precision</div>
               <div className="text-xs font-semibold text-slate-200">
-                {activeModel.model_precision || 92.4}%
+                {formatModelPercent(activeModel.model_precision)}
               </div>
             </div>
             <div className="bg-[#0B111E] py-1 rounded border border-[#1E293B]">
               <div className="text-[9px] uppercase text-slate-400 font-sans">Recall</div>
               <div className="text-xs font-semibold text-slate-200">
-                {activeModel.model_recall || 88.1}%
+                {formatModelPercent(activeModel.model_recall)}
               </div>
             </div>
             <div className="bg-[#0B111E] py-1 rounded border border-[#1E293B]">
-              <div className="text-[9px] uppercase text-slate-400 font-sans">F2 Score</div>
-              <div className="text-xs font-semibold text-cyan-400">0.898</div>
+              <div className="text-[9px] uppercase text-slate-400 font-sans">F1 Score</div>
+              <div className="text-xs font-semibold text-cyan-400">
+                {formatModelScore(activeModel.model_f1_score)}
+              </div>
             </div>
           </div>
         </div>
