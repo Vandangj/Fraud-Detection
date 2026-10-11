@@ -65,9 +65,19 @@ export function DatabaseTablesPage() {
 
   const loadTables = async () => {
     try {
-      const data = await api.getDatabaseTables();
+      const [data, transactionSummary] = await Promise.all([
+        api.getDatabaseTables(),
+        api.getTransactionSummary().catch((err) => {
+          console.error('Failed to load transaction totals:', err);
+          return null;
+        }),
+      ]);
       if (Array.isArray(data) && data.length > 0) {
-        setTablesList(data);
+        setTablesList(data.map((table) => (
+          table.table_name === 'transactions' && transactionSummary?.transaction_count != null
+            ? { ...table, total_rows: transactionSummary.transaction_count }
+            : table
+        )));
         // Default to 'frauds' or first table if 'frauds' not found
         const hasFrauds = data.some((t) => t.table_name === 'frauds');
         if (!hasFrauds && data[0]) {
