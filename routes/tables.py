@@ -52,7 +52,7 @@ def get_table_row_counts(conn) -> Dict[str, int]:
         pass
 
     # Exact counts for smaller tables
-    for small_t in ["models", "drift_reports", "frauds"]:
+    for small_t in ["models", "drift_reports", "frauds", "alerts", "users"]:
         try:
             t_obj = metadata.tables.get(small_t)
             if t_obj is not None:

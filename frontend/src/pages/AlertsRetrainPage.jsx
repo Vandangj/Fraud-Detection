@@ -19,40 +19,7 @@ export function AlertsRetrainPage({ onNavigateTransactions, onNavigateDrift }) {
   const loadAlerts = async () => {
     setLoading(true);
     try {
-      const reports = await api.getDriftReports();
-      const psiAlerts = (Array.isArray(reports) ? reports : [])
-        .map((report) => {
-          const psi = Number(report.drift_score);
-          if (!Number.isFinite(psi) || psi < 0.10) return null;
-
-          const type = psi >= 0.25 ? 'risky' : 'moderate';
-          const date = report.report_time || report.checked_at;
-          return {
-            id: `DRIFT-${report.report_id}`,
-            type,
-            psi,
-            tag: type.toUpperCase(),
-            title: `${type === 'risky' ? 'Risky' : 'Moderate'} PSI: ${report.feature_name}`,
-            message: `Model ${report.model_id} recorded PSI ${psi.toFixed(3)} for ${report.feature_name}.`,
-            impact: type === 'risky'
-              ? `PSI ${psi.toFixed(3)} is at or above 0.25, the project's drift-detected threshold. Investigate this feature before relying on current model decisions.`
-              : `PSI ${psi.toFixed(3)} is in the moderate band (0.10 to less than 0.25). Monitor the next report and investigate if it rises to 0.25.`,
-            timestamp: date
-              ? new Date(date).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
-              : 'Time unavailable',
-            code: report.model_id,
-            source: `Drift report #${report.report_id}`,
-            metric: `PSI: ${psi.toFixed(3)}`,
-            actionLabel: 'Open drift monitoring',
-          };
-        })
-        .filter(Boolean)
-        .sort((left, right) => {
-          const groupOrder = (left.type === 'risky' ? 0 : 1) - (right.type === 'risky' ? 0 : 1);
-          return groupOrder || right.psi - left.psi || right.id.localeCompare(left.id);
-        });
-
-      setAlerts(psiAlerts);
+      setAlerts(await api.getRiskAlerts());
     } catch (err) {
       console.error('Failed to load PSI alerts:', err);
       setAlerts([]);

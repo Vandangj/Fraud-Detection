@@ -65,19 +65,27 @@ export function DatabaseTablesPage() {
 
   const loadTables = async () => {
     try {
-      const [data, transactionSummary] = await Promise.all([
+      const [data, transactionSummary, riskAlerts] = await Promise.all([
         api.getDatabaseTables(),
         api.getTransactionSummary().catch((err) => {
           console.error('Failed to load transaction totals:', err);
           return null;
         }),
+        api.getRiskAlerts().catch((err) => {
+          console.error('Failed to load risk alerts:', err);
+          return [];
+        }),
       ]);
       if (Array.isArray(data) && data.length > 0) {
-        setTablesList(data.map((table) => (
-          table.table_name === 'transactions' && transactionSummary?.transaction_count != null
-            ? { ...table, total_rows: transactionSummary.transaction_count }
-            : table
-        )));
+        setTablesList(data.map((table) => {
+          if (table.table_name === 'transactions' && transactionSummary?.transaction_count != null) {
+            return { ...table, total_rows: transactionSummary.transaction_count };
+          }
+          if (table.table_name === 'alerts') {
+            return { ...table, total_rows: riskAlerts.length };
+          }
+          return table;
+        }));
         // Default to 'frauds' or first table if 'frauds' not found
         const hasFrauds = data.some((t) => t.table_name === 'frauds');
         if (!hasFrauds && data[0]) {
@@ -109,6 +117,71 @@ export function DatabaseTablesPage() {
         params.filter_column = filterColumn;
         params.filter_operator = filterOperator;
         params.filter_value = filterValue;
+      }
+
+      if (selectedTable === 'alerts') {
+        const alertRows = await api.getRiskAlerts();
+        let filteredRows = alertRows;
+
+        if (searchTerm) {
+          const search = searchTerm.toLowerCase();
+          filteredRows = filteredRows.filter((row) =>
+            Object.values(row).some((value) => String(value ?? '').toLowerCase().includes(search))
+          );
+        }
+
+        if (filterColumn && filterValue !== '') {
+          const expected = filterValue.toLowerCase();
+          filteredRows = filteredRows.filter((row) => {
+            const value = row[filterColumn];
+            const actual = String(value ?? '').toLowerCase();
+            const actualNumber = Number(value);
+            const expectedNumber = Number(filterValue);
+            switch (filterOperator) {
+              case 'eq': return actual === expected;
+              case 'neq': return actual !== expected;
+              case 'gt': return actualNumber > expectedNumber;
+              case 'gte': return actualNumber >= expectedNumber;
+              case 'lt': return actualNumber < expectedNumber;
+              case 'lte': return actualNumber <= expectedNumber;
+              case 'startswith': return actual.startsWith(expected);
+              case 'is_null': return value == null;
+              case 'not_null': return value != null;
+              case 'is_true': return Boolean(value) === true;
+              case 'is_false': return Boolean(value) === false;
+              case 'contains':
+              default: return actual.includes(expected);
+            }
+          });
+        }
+
+        if (sortBy) {
+          filteredRows.sort((left, right) => {
+            const comparison = String(left[sortBy] ?? '').localeCompare(String(right[sortBy] ?? ''), undefined, {
+              numeric: true,
+              sensitivity: 'base',
+            });
+            return sortOrder === 'asc' ? comparison : -comparison;
+          });
+        }
+
+        const columns = Object.keys(alertRows[0] || {
+          id: '', type: '', psi: 0, tag: '', title: '', message: '', impact: '',
+          timestamp: '', code: '', source: '', metric: '', actionLabel: '',
+        }).map((name) => ({ name, type: 'TEXT', primary_key: name === 'id' }));
+        const filteredCount = filteredRows.length;
+        const res = {
+          columns,
+          rows: filteredRows.slice((page - 1) * pageSize, page * pageSize),
+          total_rows: alertRows.length,
+          filtered_rows: filteredCount,
+          total_pages: Math.max(1, Math.ceil(filteredCount / pageSize)),
+        };
+        setTableData(res);
+        if (!visibleColumns.alerts || visibleColumns.alerts.length === 0) {
+          setVisibleColumns((prev) => ({ ...prev, alerts: columns.map((column) => column.name) }));
+        }
+        return;
       }
 
       const res = await api.getTableData(selectedTable, params);
@@ -331,6 +404,7 @@ export function DatabaseTablesPage() {
           const isSelected = selectedTable === t.table_name;
           const iconMap = {
             frauds: 'gavel',
+            alerts: 'notifications_active',
             drift_reports: 'ssid_chart',
             models: 'psychology',
             transactions: 'receipt_long',
