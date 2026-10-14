@@ -2,6 +2,256 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  color-scheme: dark;
+  --app-background: #17181D;
+  --surface-card: #22242C;
+  --surface-raised: #292B33;
+  --border-subtle: #353640;
+  --accent-copper: #B78362;
+  --accent-copper-hover: #C28F6F;
+  --accent-copper-light: #CCA184;
+  --accent-copper-soft: rgb(183 131 98 / 14%);
+  --series-plum: #88758F;
+  --series-plum-light: #9A879F;
+  --series-plum-deep: #393343;
+  --status-fraud: #E06C75;
+  --status-warning: #E0B36A;
+  --status-success: #68B89A;
+  --text-secondary: #B8B9C1;
+  --text-muted: #999AA3;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  background-color: var(--app-background);
+}
+
+body {
+  color: #F3F1EF;
+  font-family: Inter, "Segoe UI", sans-serif;
+  font-weight: 400;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: Inter, "Segoe UI", sans-serif;
+  font-weight: 500 !important;
+}
+
+[class*="bg-[#0B111E]"],
+[class*="bg-[#080D17]"],
+[class*="bg-[#080E1B]"],
+[class*="bg-[#070C16]"],
+[class*="bg-[#0D1320]"] {
+  background-color: var(--app-background) !important;
+}
+
+[class*="bg-[#131D31]"],
+[class*="bg-[#132238]"] {
+  background-color: var(--surface-card) !important;
+}
+
+[class*="bg-[#0F172A]"],
+[class*="bg-[#1A263D]"],
+[class*="bg-[#1A263E]"] {
+  background-color: var(--surface-raised) !important;
+}
+
+[class*="bg-[#1E293B]"],
+[class*="bg-[#15243E]"] {
+  background-color: #30323A !important;
+}
+
+[class*="border-[#1E293B]"],
+[class*="border-[#223049]"],
+[class*="border-[#2A3A54]"],
+[class*="border-[#334155]"] {
+  border-color: var(--border-subtle) !important;
+}
+
+[class*="divide-[#1E293B]"] > :not(:first-child) {
+  border-color: var(--border-subtle) !important;
+}
+
+[class~="bg-cyan-500"],
+[class~="bg-[#06B6D4]"] {
+  background-color: var(--accent-copper) !important;
+}
+
+[class~="hover:bg-cyan-400"]:hover,
+[class~="hover:bg-[#0891B2]"]:hover {
+  background-color: var(--accent-copper-hover) !important;
+}
+
+[class*="text-cyan-"],
+[class*="text-[#06B6D4]"],
+[class*="text-[#4CD7F6]"] {
+  color: var(--accent-copper-light) !important;
+}
+
+[class*="border-cyan-"] {
+  border-color: rgb(183 131 98 / 48%) !important;
+}
+
+[class*="bg-cyan-950/"],
+[class*="bg-cyan-900/"],
+[class*="bg-[#06B6D4]/"] {
+  background-color: var(--accent-copper-soft) !important;
+}
+
+[class*="ring-cyan-"] {
+  --tw-ring-color: rgb(183 131 98 / 45%) !important;
+}
+
+[class*="text-red-"] {
+  color: var(--status-fraud) !important;
+}
+
+[class*="border-red-"] {
+  border-color: rgb(224 108 117 / 55%) !important;
+}
+
+[class*="bg-red-950/"],
+[class*="bg-red-900/"],
+[class*="bg-red-800/"] {
+  background-color: rgb(224 108 117 / 13%) !important;
+}
+
+[class~="bg-red-600"],
+[class~="bg-red-500"],
+[class~="bg-red-400"] {
+  background-color: #B8525C !important;
+}
+
+[class*="text-amber-"] {
+  color: var(--status-warning) !important;
+}
+
+[class*="border-amber-"] {
+  border-color: rgb(224 179 106 / 52%) !important;
+}
+
+[class*="bg-amber-950/"],
+[class*="bg-amber-900/"],
+[class*="bg-amber-800/"] {
+  background-color: rgb(224 179 106 / 13%) !important;
+}
+
+[class~="bg-amber-600"],
+[class~="bg-amber-500"],
+[class~="bg-amber-400"] {
+  background-color: #A98248 !important;
+}
+
+[class*="text-emerald-"],
+[class*="text-green-"] {
+  color: var(--status-success) !important;
+}
+
+[class*="border-emerald-"],
+[class*="border-green-"] {
+  border-color: rgb(104 184 154 / 48%) !important;
+}
+
+[class*="bg-emerald-950/"],
+[class*="bg-emerald-900/"],
+[class*="bg-green-950/"],
+[class*="bg-green-900/"] {
+  background-color: rgb(104 184 154 / 13%) !important;
+}
+
+[class~="bg-emerald-600"],
+[class~="bg-emerald-500"],
+[class~="bg-emerald-400"],
+[class~="bg-green-600"],
+[class~="bg-green-500"],
+[class~="bg-green-400"] {
+  background-color: #4F9479 !important;
+}
+
+[class*="text-purple-"],
+[class*="text-violet-"] {
+  color: var(--series-plum-light) !important;
+}
+
+[class*="border-purple-"],
+[class*="border-violet-"] {
+  border-color: rgb(154 135 159 / 48%) !important;
+}
+
+[class*="bg-purple-950/"],
+[class*="bg-purple-900/"],
+[class*="bg-violet-950/"],
+[class*="bg-violet-900/"] {
+  background-color: rgb(57 51 67 / 68%) !important;
+}
+
+[class~="bg-purple-600"],
+[class~="bg-purple-500"],
+[class~="bg-violet-600"],
+[class~="bg-violet-500"] {
+  background-color: #64566B !important;
+}
+
+[class*="text-blue-"],
+[class*="text-indigo-"] {
+  color: var(--accent-copper-light) !important;
+}
+
+[class*="border-blue-"],
+[class*="border-indigo-"] {
+  border-color: rgb(183 131 98 / 45%) !important;
+}
+
+[class*="bg-blue-950/"],
+[class*="bg-indigo-950/"] {
+  background-color: rgb(57 51 67 / 65%) !important;
+}
+
+[class~="bg-blue-600"],
+[class~="bg-blue-500"],
+[class~="bg-indigo-600"],
+[class~="bg-indigo-500"] {
+  background-color: #64566B !important;
+}
+
+[class*="border-[#06B6D4]"],
+[class*="border-[#4CD7F6]"],
+[class*="focus:border-[#06B6D4]"]:focus {
+  border-color: rgb(183 131 98 / 52%) !important;
+}
+
+[class*="shadow-cyan-"] {
+  --tw-shadow: 0 0 #0000 !important;
+  box-shadow: none !important;
+}
+
+[class*="bg-gradient-to-"] {
+  background-image: none !important;
+}
+
+.shadow-lg,
+.shadow-xl,
+.shadow-2xl {
+  box-shadow: 0 8px 22px rgb(0 0 0 / 18%) !important;
+}
+
+.text-slate-500 {
+  color: var(--text-muted) !important;
+}
+
+.text-slate-600,
+.text-slate-700 {
+  color: #8E9099 !important;
+}
+
 /* Material Symbols Outlined settings */
 .material-symbols-outlined {
   font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 20;
@@ -16,32 +266,26 @@
   font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 20;
 }
 
-/* Custom Scrollbars matching Stitch Dark Theme */
+/* Low-contrast surfaces keep scrolling unobtrusive. */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #0B111E;
+  background: var(--app-background);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #1E293B;
+  background: var(--border-subtle);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #334155;
+  background: #555761;
 }
 
-/* Grid Background Mesh from Stitch Login */
+/* Keep the Login backdrop on the same quiet solid surface. */
 .grid-bg-mesh {
-  background-color: #070C16;
-  background-image:
-    radial-gradient(circle at 20% 20%, rgba(6, 182, 212, 0.15) 0%, transparent 45%),
-    radial-gradient(circle at 80% 80%, rgba(79, 219, 200, 0.08) 0%, transparent 45%),
-    linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
-  background-size: 100% 100%, 100% 100%, 36px 36px, 36px 36px;
+  background-color: var(--app-background);
 }

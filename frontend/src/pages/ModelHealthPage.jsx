@@ -208,11 +208,11 @@ export function ModelHealthPage({ onTriggerRetrain, initialModelId }) {
 
   // Multi-model color mapping
   const modelColors = {
-    'rf-balanced-v1': '#10B981', // Emerald
-    'xgb-boosted-v1': '#06B6D4', // Cyan
-    'lgb-fast-v1': '#A855F7',   // Purple
-    'gb-ensemble-v1': '#F59E0B', // Amber
-    'lr-baseline-v1': '#64748B', // Slate
+    'rf-balanced': '#B78362',
+    'xgb-boosted': '#806C88',
+    'lgb-fast': '#8F7B94',
+    'gb-ensemble': '#9B7569',
+    'lr-baseline': '#A3A1A8',
   };
 
   return (
@@ -366,7 +366,8 @@ export function ModelHealthPage({ onTriggerRetrain, initialModelId }) {
             <tbody className="divide-y divide-[#1E293B] font-mono">
               {displayedModels.map((m) => {
                 const isSelected = selectedModelId === m.model_id;
-                const color = modelColors[m.model_id] || '#06B6D4';
+                const modelFamily = m.model_id.replace(/-v\d+$/, '');
+                const color = modelColors[modelFamily] || '#B78362';
                 return (
                   <tr
                     key={m.model_id}
@@ -669,7 +670,7 @@ export function ModelHealthPage({ onTriggerRetrain, initialModelId }) {
               <path
                 d="M 50 170 Q 70 30 480 22"
                 fill="none"
-                stroke="#10B981"
+                stroke={modelColors['rf-balanced']}
                 strokeWidth={selectedModelId === 'rf-balanced-v1' ? "3" : "1.5"}
                 strokeOpacity={selectedModelId === 'rf-balanced-v1' ? "1" : "0.5"}
               />
@@ -678,7 +679,7 @@ export function ModelHealthPage({ onTriggerRetrain, initialModelId }) {
               <path
                 d="M 50 170 Q 62 25 480 20"
                 fill="none"
-                stroke="#06B6D4"
+                stroke={modelColors['xgb-boosted']}
                 strokeWidth={selectedModelId === 'xgb-boosted-v1' ? "3" : "1.5"}
                 strokeOpacity={selectedModelId === 'xgb-boosted-v1' ? "1" : "0.5"}
               />
@@ -687,7 +688,7 @@ export function ModelHealthPage({ onTriggerRetrain, initialModelId }) {
               <path
                 d="M 50 170 Q 64 26 480 20"
                 fill="none"
-                stroke="#A855F7"
+                stroke={modelColors['lgb-fast']}
                 strokeWidth={selectedModelId === 'lgb-fast-v1' ? "3" : "1.5"}
                 strokeOpacity={selectedModelId === 'lgb-fast-v1' ? "1" : "0.5"}
               />
@@ -696,7 +697,7 @@ export function ModelHealthPage({ onTriggerRetrain, initialModelId }) {
               <path
                 d="M 50 170 Q 68 28 480 22"
                 fill="none"
-                stroke="#F59E0B"
+                stroke={modelColors['gb-ensemble']}
                 strokeWidth={selectedModelId === 'gb-ensemble-v1' ? "3" : "1.5"}
                 strokeOpacity={selectedModelId === 'gb-ensemble-v1' ? "1" : "0.5"}
               />
@@ -707,14 +708,14 @@ export function ModelHealthPage({ onTriggerRetrain, initialModelId }) {
                 y1="20"
                 x2={50 + threshold * 430}
                 y2="170"
-                stroke="#EC4899"
+                stroke="#E0B36A"
                 strokeDasharray="3 3"
                 strokeWidth="1.5"
               />
               <circle
                 cx={50 + threshold * 430}
                 cy="32"
-                fill="#EC4899"
+                fill="#E0B36A"
                 r="4"
               />
             </svg>
@@ -722,20 +723,20 @@ export function ModelHealthPage({ onTriggerRetrain, initialModelId }) {
             {/* Legend inside chart */}
             <div className="flex flex-wrap items-center justify-between text-[10px] font-mono px-2 pt-1 border-t border-[#1E293B]/60 text-slate-400">
               <div className="flex items-center gap-3">
-                <span className="flex items-center gap-1 text-emerald-400">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500"></span> RF (AUC 0.998)
+                <span className="flex items-center gap-1" style={{ color: modelColors['rf-balanced'] }}>
+                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: modelColors['rf-balanced'] }}></span> RF (AUC 0.998)
                 </span>
-                <span className="flex items-center gap-1 text-cyan-400">
-                  <span className="w-2 h-2 rounded-full bg-cyan-400"></span> XGBoost (AUC 0.999)
+                <span className="flex items-center gap-1" style={{ color: modelColors['xgb-boosted'] }}>
+                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: modelColors['xgb-boosted'] }}></span> XGBoost (AUC 0.999)
                 </span>
-                <span className="flex items-center gap-1 text-purple-400">
-                  <span className="w-2 h-2 rounded-full bg-purple-400"></span> LightGBM (AUC 0.999)
+                <span className="flex items-center gap-1" style={{ color: modelColors['lgb-fast'] }}>
+                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: modelColors['lgb-fast'] }}></span> LightGBM (AUC 0.999)
                 </span>
-                <span className="flex items-center gap-1 text-amber-400">
-                  <span className="w-2 h-2 rounded-full bg-amber-400"></span> GradBoost (AUC 0.999)
+                <span className="flex items-center gap-1" style={{ color: modelColors['gb-ensemble'] }}>
+                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: modelColors['gb-ensemble'] }}></span> GradBoost (AUC 0.999)
                 </span>
               </div>
-              <span className="text-pink-400 font-bold">Cutoff τ = {threshold}</span>
+              <span className="text-amber-400 font-bold">Cutoff τ = {threshold}</span>
             </div>
           </div>
 
