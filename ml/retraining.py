@@ -2,6 +2,7 @@ import os
 import re
 import tempfile
 import time
+import json
 from datetime import datetime
 from pathlib import Path
 
@@ -11,12 +12,13 @@ import pandas as pd
 from imblearn.over_sampling import SMOTE
 from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score
+from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, precision_score, recall_score, roc_auc_score
 from sklearn.model_selection import train_test_split
 
 import database_models as db_models
 import schemas
 from ml.train_multimodel import engineer_features
+from ml.drift import record_model_drift_reports
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -277,6 +279,11 @@ def retrain_and_register(db, request: schemas.RetrainRequest) -> schemas.Retrain
         "model_recall": float(recall_score(y_test, predictions, zero_division=0)),
         "model_f1_score": float(f1_score(y_test, predictions, zero_division=0)),
         "model_roc_auc": float(roc_auc_score(y_test, probabilities)),
+        "confusion_matrix": confusion_matrix(y_test, predictions).tolist(),
+        "full_sample_confusion_matrix": confusion_matrix(
+            labels,
+            estimator.predict(features),
+        ).tolist(),
     }
 
     version = _next_model_version(db, family)
@@ -296,7 +303,9 @@ def retrain_and_register(db, request: schemas.RetrainRequest) -> schemas.Retrain
     os.close(reservation_fd)
 
     temporary_path = None
+    metadata_temporary_path = None
     artifact_created = False
+    metadata_created = False
     try:
         with tempfile.NamedTemporaryFile(
             dir=ARTIFACT_DIR,
@@ -314,20 +323,6 @@ def retrain_and_register(db, request: schemas.RetrainRequest) -> schemas.Retrain
 
         model_name = f"{display_name} Retrained v{version}"
         training_time = datetime.now()
-        result = schemas.RetrainResponse(
-            model_id=model_id,
-            source_model_id=request.source_model_id,
-            model_name=model_name,
-            model_type=model_type,
-            version=version,
-            training_status="completed",
-            model_status="evaluated",
-            **metrics,
-            training_time_sec=round(time.perf_counter() - started_at, 3),
-            threshold=PREDICTION_THRESHOLD,
-            artifact_path=str(artifact_path),
-            model_training_time=training_time,
-        )
         db.add(
             db_models.Model(
                 model_id=model_id,
@@ -341,14 +336,80 @@ def retrain_and_register(db, request: schemas.RetrainRequest) -> schemas.Retrain
                 model_training_time=training_time,
             )
         )
+        db.flush()
+        drift_reports = record_model_drift_reports(db, model_id)
+        db.flush()
+
+        result = schemas.RetrainResponse(
+            model_id=model_id,
+            source_model_id=request.source_model_id,
+            model_name=model_name,
+            model_type=model_type,
+            version=version,
+            training_status="completed",
+            model_status="evaluated",
+            **metrics,
+            training_time_sec=round(time.perf_counter() - started_at, 3),
+            threshold=PREDICTION_THRESHOLD,
+            artifact_path=str(artifact_path),
+            model_training_time=training_time,
+            full_sample_rows=len(labels),
+            training_rows=len(y_train),
+            validation_rows=len(y_test),
+            drift_reports_created=len(drift_reports),
+        )
+        metadata_path = ARTIFACT_DIR / f"{model_id}.json"
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=ARTIFACT_DIR,
+            prefix=f".{model_id}.",
+            suffix=".json.tmp",
+            delete=False,
+        ) as metadata_file:
+            metadata_temporary_path = Path(metadata_file.name)
+            json.dump(result.model_dump(mode="json"), metadata_file, indent=2)
+        os.replace(metadata_temporary_path, metadata_path)
+        metadata_temporary_path = None
+        metadata_created = True
+
+        db.add(
+            db_models.RetrainingHistory(
+                model_id=model_id,
+                source_model_id=request.source_model_id,
+                model_name=model_name,
+                model_type=model_type,
+                version=version,
+                training_status="completed",
+                model_status="evaluated",
+                model_accuracy=metrics["model_accuracy"],
+                model_precision=metrics["model_precision"],
+                model_recall=metrics["model_recall"],
+                model_f1_score=metrics["model_f1_score"],
+                model_roc_auc=metrics["model_roc_auc"],
+                confusion_matrix=metrics["confusion_matrix"],
+                full_sample_confusion_matrix=metrics["full_sample_confusion_matrix"],
+                full_sample_rows=len(labels),
+                training_rows=len(y_train),
+                validation_rows=len(y_test),
+                training_time_sec=result.training_time_sec,
+                threshold=result.threshold,
+                artifact_path=str(artifact_path),
+                retrained_at=training_time,
+            )
+        )
         db.commit()
         return result
     except Exception:
         db.rollback()
         if artifact_created:
             artifact_path.unlink(missing_ok=True)
+        if metadata_created:
+            metadata_path.unlink(missing_ok=True)
         raise
     finally:
         if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)
+        if metadata_temporary_path is not None:
+            metadata_temporary_path.unlink(missing_ok=True)
         reservation_path.unlink(missing_ok=True)

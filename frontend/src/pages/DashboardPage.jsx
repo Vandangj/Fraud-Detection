@@ -62,31 +62,6 @@ export function DashboardPage({ transactionCounts, onInspectCase, onNavigateTran
   };
   return (
     <div className="space-y-6">
-      {/* Live Stream Status Strip */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between bg-[#131D31] border border-[#1E293B] px-4 py-2.5 rounded-lg text-xs gap-3">
-        <div className="flex items-center gap-3 flex-wrap">
-          <span className="relative flex h-2.5 w-2.5">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-          </span>
-          <span className="font-medium text-slate-200">FastAPI Pipeline Active</span>
-          <span className="text-slate-500">•</span>
-          <span className="text-cyan-400 font-sans">Database: MySQL Connected</span>
-          <span className="text-slate-500">•</span>
-          <span className="text-slate-300 font-sans">Model: Random Forest (SMOTE)</span>
-        </div>
-        <div className="flex items-center gap-4 text-slate-400 text-xs">
-          <div>
-            Backend: <span className="text-slate-200 font-medium font-mono">localhost:8000</span>
-          </div>
-          <div className="h-3 w-px bg-[#1E293B]"></div>
-          <div className="flex items-center gap-1.5 text-slate-300">
-            <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-            <span>API Online</span>
-          </div>
-        </div>
-      </div>
-
       {/* METRIC CARDS ROW (4 Cards) */}
       <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Total Transactions */}

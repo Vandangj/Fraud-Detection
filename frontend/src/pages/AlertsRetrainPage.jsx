@@ -1,14 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
-import { useAuth } from '../context/AuthContext';
 import StatusBadge from '../components/Common/StatusBadge';
-import Modal from '../components/Common/Modal';
-import PendingNotice from '../components/Common/PendingNotice';
 
-export function AlertsRetrainPage({ onNavigateTransactions, onNavigateDrift }) {
-  const { isAdmin } = useAuth();
+export function AlertsRetrainPage({ onNavigateTransactions, onNavigateDrift, onTriggerRetrain }) {
   const [filterSeverity, setFilterSeverity] = useState('ALL');
-  const [isRetrainModalOpen, setIsRetrainModalOpen] = useState(false);
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -85,7 +80,7 @@ export function AlertsRetrainPage({ onNavigateTransactions, onNavigateDrift }) {
           </div>
 
           <button
-            onClick={() => setIsRetrainModalOpen(true)}
+            onClick={onTriggerRetrain}
             className="h-8 px-3.5 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-semibold text-xs rounded transition-colors flex items-center gap-1.5 shadow-sm"
             type="button"
           >
@@ -210,75 +205,6 @@ export function AlertsRetrainPage({ onNavigateTransactions, onNavigateDrift }) {
         })}
       </section>
 
-      {/* Retrain Pipeline Status Modal */}
-      <Modal
-        isOpen={isRetrainModalOpen}
-        onClose={() => setIsRetrainModalOpen(false)}
-        title="Model Retraining Pipeline Status"
-        icon="restart_alt"
-        maxWidth="max-w-xl"
-      >
-        <div className="space-y-4 text-xs font-sans">
-          <PendingNotice
-            feature="Automated Model Retraining Pipeline"
-            endpoint="POST /models/retrain"
-            sourceFile="ml/train.py"
-            description="The ML training script (ml/train.py) and retraining endpoint are pending backend implementation. Execution is disabled to ensure no fabricated simulation is presented."
-          />
-
-          <div className="bg-[#131D31] border border-[#1E293B] rounded divide-y divide-[#1E293B] text-xs">
-            <div className="px-3.5 py-2 flex justify-between items-center">
-              <span className="text-slate-400">Target Model:</span>
-              <span className="font-mono text-white font-semibold">
-                Random Forest Classifier (SMOTE)
-              </span>
-            </div>
-            <div className="px-3.5 py-2 flex justify-between items-center">
-              <span className="text-slate-400">Dataset Source:</span>
-              <span className="text-slate-200">MySQL ground-truth transactions</span>
-            </div>
-            <div className="px-3.5 py-2 flex justify-between items-center">
-              <span className="text-slate-400">Class Balancing:</span>
-              <span className="text-cyan-400 font-mono">SMOTE (Over-sampling)</span>
-            </div>
-            <div className="px-3.5 py-2 flex justify-between items-center">
-              <span className="text-slate-400">Execution Status:</span>
-              <span className="px-2 py-0.5 rounded bg-amber-950/70 border border-amber-600/50 text-amber-300 font-mono font-medium">
-                Retraining API Pending
-              </span>
-            </div>
-            <div className="px-3.5 py-2 flex justify-between items-center">
-              <span className="text-slate-400">Authorization:</span>
-              <span className="font-mono text-slate-300">
-                {isAdmin ? (
-                  <span className="text-emerald-400 font-bold">Admin</span>
-                ) : (
-                  <span className="text-slate-400">Analyst (View Only)</span>
-                )}
-              </span>
-            </div>
-          </div>
-
-          <div className="pt-2 flex items-center justify-end gap-2 border-t border-[#1E293B]">
-            <button
-              onClick={() => setIsRetrainModalOpen(false)}
-              className="h-8 px-3 rounded bg-[#0F172A] border border-[#1E293B] text-slate-300 hover:text-white"
-              type="button"
-            >
-              Close
-            </button>
-            <button
-              disabled
-              className="h-8 px-3.5 rounded font-semibold bg-[#1E293B] text-slate-500 cursor-not-allowed border border-slate-700 flex items-center gap-1.5"
-              type="button"
-              title="Execution disabled until backend endpoint POST /models/retrain is implemented"
-            >
-              <span className="material-symbols-outlined text-sm">block</span>
-              <span>Retraining API Pending</span>
-            </button>
-          </div>
-        </div>
-      </Modal>
     </div>
   );
 }

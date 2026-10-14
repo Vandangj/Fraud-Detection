@@ -89,13 +89,25 @@ def get_available_models():
 
 def get_comparison_metrics():
     """Load precomputed multi-model benchmark metrics from JSON."""
+    comparison_metrics = {}
     if os.path.exists(METRICS_PATH):
         try:
             with open(METRICS_PATH, "r") as f:
-                return json.load(f)
+                comparison_metrics.update(json.load(f))
         except Exception:
             pass
-    return {}
+
+    if RETRAINED_MODELS_DIR.exists():
+        for metadata_path in RETRAINED_MODELS_DIR.glob("*.json"):
+            if not RETRAINED_MODEL_ID.fullmatch(metadata_path.stem):
+                continue
+            try:
+                with metadata_path.open("r", encoding="utf-8") as metadata_file:
+                    comparison_metrics[metadata_path.stem] = json.load(metadata_file)
+            except (OSError, json.JSONDecodeError):
+                continue
+
+    return comparison_metrics
 
 
 def predict_fraud(data, model_id: str = "rf-balanced-v1"):

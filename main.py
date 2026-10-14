@@ -1,6 +1,7 @@
 from datetime import datetime
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
 from database import engine, Base, SessionLocal
@@ -22,6 +23,28 @@ from routes import (
 
 # Create database tables automatically
 Base.metadata.create_all(bind=engine)
+
+# Add split-count columns to history tables created by earlier app versions.
+history_columns = {
+    column["name"]
+    for column in inspect(engine).get_columns("retraining_history")
+}
+history_column_types = {
+    "full_sample_confusion_matrix": "JSON",
+    "full_sample_rows": "INTEGER",
+    "training_rows": "INTEGER",
+    "validation_rows": "INTEGER",
+}
+missing_history_columns = set(history_column_types) - history_columns
+if missing_history_columns:
+    with engine.begin() as connection:
+        for column_name in missing_history_columns:
+            connection.execute(
+                text(
+                    f"ALTER TABLE retraining_history ADD COLUMN {column_name} "
+                    f"{history_column_types[column_name]}"
+                )
+            )
 
 
 app = FastAPI(

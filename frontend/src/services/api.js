@@ -171,6 +171,12 @@ export const api = {
   getDriftReports: () => 
     apiRequest('/drift-reports/'),
 
+  checkDrift: (checkData) =>
+    apiRequest('/drift-reports/check', {
+      method: 'POST',
+      body: JSON.stringify(checkData),
+    }),
+
   getRiskAlerts: async () => {
     const reports = await apiRequest('/drift-reports/');
     return (Array.isArray(reports) ? reports : [])
@@ -248,9 +254,13 @@ export const api = {
     apiRequest(`/transactions/${transactionId}/explanation`),
 
   // Trigger Model Retrain — POST /retrain
-  triggerRetrainPipeline: () =>
+  triggerRetrainPipeline: (sourceModelId = 'rf-balanced-v1', sampleNonFraud = 80000) =>
     apiRequest('/retrain/', {
       method: 'POST',
+      body: JSON.stringify({
+        source_model_id: sourceModelId,
+        sample_non_fraud: sampleNonFraud,
+      }),
     }),
 
   // Alerts derived from high fraud scores + drift reports
@@ -262,6 +272,9 @@ export const api = {
   // ==========================================
   getModelsComparison: () =>
     apiRequest('/models/comparison'),
+
+  getRetrainingHistory: () =>
+    apiRequest('/retrain/history'),
 
   // ==========================================
   // Database Tables Explorer API (/tables)

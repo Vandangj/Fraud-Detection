@@ -19,7 +19,6 @@ class UserUpdate(BaseModel):
     name: Optional[str] = None
     account_type: Optional[str] = None
     email: Optional[str] = None
-    password_hash: Optional[str] = None
 
 
 class UserResponse(BaseModel):
@@ -302,3 +301,36 @@ class RetrainResponse(BaseModel):
     threshold: float
     artifact_path: str
     model_training_time: datetime
+    confusion_matrix: list[list[int]] = Field(default_factory=list)
+    full_sample_confusion_matrix: list[list[int]] = Field(default_factory=list)
+    full_sample_rows: int = 0
+    training_rows: int = 0
+    validation_rows: int = 0
+    drift_reports_created: int = 0
+
+
+class RetrainingHistoryResponse(BaseModel):
+    history_id: int
+    model_id: str
+    source_model_id: str
+    model_name: str
+    model_type: str
+    version: int
+    training_status: str
+    model_status: str
+    model_accuracy: float
+    model_precision: float
+    model_recall: float
+    model_f1_score: float
+    model_roc_auc: float
+    confusion_matrix: list[list[int]]
+    full_sample_confusion_matrix: Optional[list[list[int]]] = None
+    full_sample_rows: Optional[int] = None
+    training_rows: Optional[int] = None
+    validation_rows: Optional[int] = None
+    training_time_sec: Optional[float] = None
+    threshold: float
+    artifact_path: Optional[str] = None
+    retrained_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)

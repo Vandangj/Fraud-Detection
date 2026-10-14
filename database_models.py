@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Numeric, Boolean, UniqueConstraint
+from sqlalchemy import Column, Integer, String, DateTime, Numeric, Boolean, UniqueConstraint, JSON
 from sqlalchemy import ForeignKey
 from database import Base
 
@@ -42,6 +42,33 @@ class Model(Base):
     model_roc_auc = Column(Numeric(15, 2))
     model_status = Column(String(50))
     model_training_time = Column(DateTime)
+
+
+class RetrainingHistory(Base):
+    __tablename__ = "retraining_history"
+
+    history_id = Column(Integer, primary_key=True, index=True)
+    model_id = Column(String(50), ForeignKey("models.model_id"), nullable=False, unique=True)
+    source_model_id = Column(String(50), nullable=False)
+    model_name = Column(String(100), nullable=False)
+    model_type = Column(String(100), nullable=False)
+    version = Column(Integer, nullable=False)
+    training_status = Column(String(30), nullable=False)
+    model_status = Column(String(50), nullable=False)
+    model_accuracy = Column(Numeric(15, 8), nullable=False)
+    model_precision = Column(Numeric(15, 8), nullable=False)
+    model_recall = Column(Numeric(15, 8), nullable=False)
+    model_f1_score = Column(Numeric(15, 8), nullable=False)
+    model_roc_auc = Column(Numeric(15, 8), nullable=False)
+    confusion_matrix = Column(JSON, nullable=False, default=list)
+    full_sample_confusion_matrix = Column(JSON)
+    full_sample_rows = Column(Integer)
+    training_rows = Column(Integer)
+    validation_rows = Column(Integer)
+    training_time_sec = Column(Numeric(12, 3))
+    threshold = Column(Numeric(8, 6), nullable=False)
+    artifact_path = Column(String(500))
+    retrained_at = Column(DateTime, nullable=False, index=True)
 
 
 class Fraud_prediction(Base):

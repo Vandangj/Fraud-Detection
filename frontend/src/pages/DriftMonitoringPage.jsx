@@ -1,11 +1,34 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 import StatusBadge from '../components/Common/StatusBadge';
 import Modal from '../components/Common/Modal';
 
+const DRIFT_FEATURES = [
+  'step',
+  'amount',
+  'old_balance',
+  'new_balance',
+  'transaction_type',
+  'is_fraud',
+  'balanceDiffOrig',
+  'amountToOrigBalance',
+  'type_CASH_IN',
+  'type_CASH_OUT',
+  'type_DEBIT',
+  'type_PAYMENT',
+  'type_TRANSFER',
+];
+
 export function DriftMonitoringPage() {
+  const { user } = useAuth();
   const [driftReports, setDriftReports] = useState([]);
+  const [models, setModels] = useState([]);
+  const [selectedModelId, setSelectedModelId] = useState('');
   const [loading, setLoading] = useState(true);
+  const [isCheckingDrift, setIsCheckingDrift] = useState(false);
+  const [driftCheckProgress, setDriftCheckProgress] = useState(null);
+  const [driftCheckFeedback, setDriftCheckFeedback] = useState(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [newReport, setNewReport] = useState({
     model_id: 'rf_smote_v1.0',
@@ -16,53 +39,37 @@ export function DriftMonitoringPage() {
 
   useEffect(() => {
     loadDriftReports();
+    loadModels();
   }, []);
+
+  const loadModels = async () => {
+    try {
+      const data = await api.getModels();
+      if (!Array.isArray(data) || data.length === 0) return;
+      setModels(data);
+      const configuredModelId = user?.modelEnvironment
+        ? `${user.modelEnvironment.replace(/-v\d+$/, '')}-v1`
+        : null;
+      const activeModel = data.find((model) => model.model_id === configuredModelId)
+        || data.find((model) => model.model_status?.toLowerCase() === 'active')
+        || data.find((model) => model.model_id === 'rf-balanced-v1')
+        || data[0];
+      const defaultModelId = activeModel.model_id
+      setSelectedModelId((current) => current || defaultModelId);
+      setNewReport((current) => ({ ...current, model_id: defaultModelId }));
+    } catch (err) {
+      console.error('Failed to load models for drift checking:', err);
+    }
+  };
 
   const loadDriftReports = async () => {
     setLoading(true);
     try {
       const data = await api.getDriftReports();
-      if (Array.isArray(data) && data.length > 0) {
-        setDriftReports(data);
-      } else {
-        // Fallback realistic feature drift baseline
-        setDriftReports([
-          {
-            report_id: 1,
-            model_id: 'rf_smote_v1.0',
-            feature_name: 'amt_ratio_to_avg',
-            drift_score: 0.14,
-            drift_status: 'Moderate',
-            checked_at: new Date().toISOString(),
-          },
-          {
-            report_id: 2,
-            model_id: 'rf_smote_v1.0',
-            feature_name: 'distance_from_home',
-            drift_score: 0.04,
-            drift_status: 'Stable',
-            checked_at: new Date(Date.now() - 3600000).toISOString(),
-          },
-          {
-            report_id: 3,
-            model_id: 'rf_smote_v1.0',
-            feature_name: 'transaction_velocity_1h',
-            drift_score: 0.03,
-            drift_status: 'Stable',
-            checked_at: new Date(Date.now() - 7200000).toISOString(),
-          },
-          {
-            report_id: 4,
-            model_id: 'rf_smote_v1.0',
-            feature_name: 'destination_step_diff',
-            drift_score: 0.28,
-            drift_status: 'Critical',
-            checked_at: new Date(Date.now() - 10800000).toISOString(),
-          },
-        ]);
-      }
+      setDriftReports(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error('Failed to load drift reports:', err);
+      setDriftReports([]);
     } finally {
       setLoading(false);
     }
@@ -85,6 +92,84 @@ export function DriftMonitoringPage() {
     }
   };
 
+  const handleRunDriftCheck = async () => {
+    if (!selectedModelId || isCheckingDrift) return;
+
+    setIsCheckingDrift(true);
+    setDriftCheckFeedback(null);
+    const failures = [];
+    let completed = 0;
+    try {
+      for (const [index, featureName] of DRIFT_FEATURES.entries()) {
+        setDriftCheckProgress({ current: index + 1, total: DRIFT_FEATURES.length, featureName });
+        try {
+          await api.checkDrift({
+            model_id: selectedModelId,
+            feature_name: featureName,
+            sample_size: 1000,
+          });
+          completed += 1;
+        } catch (err) {
+          failures.push({ featureName, message: err.message || 'Drift check failed.' });
+        }
+      }
+
+      await loadDriftReports();
+      setDriftCheckFeedback({ completed, total: DRIFT_FEATURES.length, failures });
+    } finally {
+      setIsCheckingDrift(false);
+      setDriftCheckProgress(null);
+    }
+  };
+
+  const selectedModelReports = driftReports.filter(
+    (report) => report.model_id === selectedModelId
+  );
+  const latestReportsByFeature = selectedModelReports.reduce((latest, report) => {
+    const current = latest[report.feature_name];
+    const reportTime = new Date(report.report_time || report.checked_at || 0).getTime();
+    const currentTime = current
+      ? new Date(current.report_time || current.checked_at || 0).getTime()
+      : -1;
+    if (!current || reportTime >= currentTime) latest[report.feature_name] = report;
+    return latest;
+  }, {});
+  const latestFeatureReports = Object.values(latestReportsByFeature)
+    .sort((left, right) => Number(right.drift_score) - Number(left.drift_score));
+  const globalPsi = latestFeatureReports.length
+    ? latestFeatureReports.reduce((total, report) => total + Number(report.drift_score), 0) / latestFeatureReports.length
+    : null;
+  const globalPsiStatus = globalPsi == null
+    ? 'unavailable'
+    : globalPsi >= 0.25
+      ? 'drift_detected'
+      : globalPsi >= 0.10
+        ? 'warning'
+        : 'stable';
+  const psiCounts = latestFeatureReports.reduce((counts, report) => {
+    const score = Number(report.drift_score);
+    if (score >= 0.25) counts.drift += 1;
+    else if (score >= 0.10) counts.warning += 1;
+    else counts.stable += 1;
+    return counts;
+  }, { stable: 0, warning: 0, drift: 0 });
+  const psiStatusClasses = {
+    stable: 'bg-emerald-950/70 text-emerald-400 border-emerald-800/70',
+    warning: 'bg-amber-950/70 text-amber-300 border-amber-800/70',
+    drift_detected: 'bg-red-950/70 text-red-300 border-red-800/70',
+    unavailable: 'bg-slate-800 text-slate-300 border-slate-700',
+  };
+  const psiStatusLabels = {
+    stable: 'STABLE',
+    warning: 'WARNING',
+    drift_detected: 'DRIFT DETECTED',
+    unavailable: 'NO REPORTS',
+  };
+  const psiNeedlePosition = globalPsi == null
+    ? '0%'
+    : `${Math.min((globalPsi / 0.5) * 100, 100)}%`;
+  const topFeatureReports = latestFeatureReports.slice(0, 5);
+
   const handleDeleteReport = async (reportId) => {
     if (!window.confirm(`Delete drift report #${reportId}?`)) return;
     try {
@@ -104,12 +189,25 @@ export function DriftMonitoringPage() {
             <h1 className="text-base font-bold text-white tracking-tight">
               Drift Monitoring & Population Stability (PSI)
             </h1>
-            <span className="px-2.5 py-0.5 rounded text-[11px] font-sans bg-cyan-950/60 text-cyan-300 border border-cyan-800/60 font-medium">
-              Model: <span className="font-mono text-white">Random Forest (v1.0)</span>
-            </span>
+            <label className="inline-flex items-center gap-2 text-[11px] font-sans text-cyan-300">
+              <span>Model</span>
+              <select
+                aria-label="Model for drift check"
+                value={selectedModelId}
+                onChange={(event) => setSelectedModelId(event.target.value)}
+                disabled={isCheckingDrift}
+                className="max-w-[240px] bg-[#0F172A] border border-cyan-800/60 text-white rounded px-2 py-1 text-xs"
+              >
+                {models.map((model) => (
+                  <option key={model.model_id} value={model.model_id}>
+                    {model.model_name || model.model_id}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
           <p className="text-xs text-slate-400 mt-0.5">
-            Statistical distribution divergence tracking between baseline training and incoming batches
+            Mean PSI across the latest feature reports; each PSI compares recent transaction windows.
           </p>
         </div>
 
@@ -123,15 +221,38 @@ export function DriftMonitoringPage() {
             <span>Record Drift Metric</span>
           </button>
           <button
-            onClick={loadDriftReports}
+            onClick={handleRunDriftCheck}
+            disabled={isCheckingDrift || !selectedModelId}
             type="button"
-            className="h-8 px-3.5 rounded bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-sm"
+            className="h-8 px-3.5 rounded bg-cyan-500 hover:bg-cyan-400 disabled:bg-[#1E293B] disabled:text-slate-500 disabled:cursor-not-allowed text-slate-950 text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-sm"
           >
-            <span className="material-symbols-outlined text-sm font-bold">refresh</span>
-            <span>Run Drift Check</span>
+            <span className={`material-symbols-outlined text-sm font-bold ${isCheckingDrift ? 'animate-spin' : ''}`}>
+              {isCheckingDrift ? 'sync' : 'monitoring'}
+            </span>
+            <span>{isCheckingDrift ? 'Checking Drift...' : 'Run Drift Check'}</span>
           </button>
         </div>
       </section>
+
+      {(isCheckingDrift || driftCheckFeedback) && (
+        <section
+          aria-live="polite"
+          className={`p-3 rounded-lg border text-xs ${driftCheckFeedback?.failures.length ? 'bg-amber-950/30 border-amber-700/50 text-amber-200' : 'bg-cyan-950/30 border-cyan-800/50 text-cyan-200'}`}
+        >
+          {isCheckingDrift ? (
+            <span>
+              Checking {driftCheckProgress?.current} of {driftCheckProgress?.total}: {driftCheckProgress?.featureName}
+            </span>
+          ) : (
+            <div className="space-y-1">
+              <p>Drift checks saved for {driftCheckFeedback.completed} of {driftCheckFeedback.total} features on {selectedModelId}.</p>
+              {driftCheckFeedback.failures.map((failure) => (
+                <p key={failure.featureName}>{failure.featureName}: {failure.message}</p>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
       {/* SECTION 1: TOP SUMMARY BANNER & PSI GAUGE ROW */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch">
@@ -140,32 +261,35 @@ export function DriftMonitoringPage() {
           <div className="flex items-start justify-between">
             <div>
               <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 font-semibold">
-                Global Model PSI
+                Mean Feature PSI
               </span>
               <div className="flex items-baseline gap-2 mt-1">
-                <span className="text-3xl font-mono font-bold text-white tracking-tight">0.082</span>
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-950/70 text-emerald-400 border border-emerald-800/70 text-[11px] font-semibold">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                  STABLE (&lt; 0.10)
+                <span className="text-3xl font-mono font-bold text-white tracking-tight">
+                  {globalPsi == null ? '—' : globalPsi.toFixed(3)}
+                </span>
+                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] font-semibold ${psiStatusClasses[globalPsiStatus]}`}>
+                  <span className="w-1.5 h-1.5 rounded-full bg-current"></span>
+                  {psiStatusLabels[globalPsiStatus]}
                 </span>
               </div>
             </div>
-            <span className="text-[10px] font-mono text-slate-400 px-1.5 py-0.5 rounded bg-[#0B111E] border border-[#1E293B]">
-              20 Bins (FD)
+              <span className="text-[10px] font-mono text-slate-400 px-1.5 py-0.5 rounded bg-[#0B111E] border border-[#1E293B]">
+              Scale: 0.00–0.50 PSI
             </span>
           </div>
 
           {/* Visual Horizontal Gauge Indicator */}
           <div className="mt-3">
             <div className="w-full h-2 rounded-full bg-[#0B111E] border border-[#1E293B] flex overflow-hidden relative">
-              <div className="h-full bg-emerald-500/80 w-[40%]" title="Stable zone (0 - 0.10)"></div>
-              <div className="h-full bg-amber-500/80 w-[30%]" title="Moderate zone (0.10 - 0.25)"></div>
-              <div className="h-full bg-red-500/80 w-[30%]" title="Critical zone (> 0.25)"></div>
-              {/* Gauge needle at 32.8% */}
-              <div
-                className="absolute top-0 bottom-0 w-1 bg-white shadow-[0_0_6px_#fff] z-10 -ml-0.5"
-                style={{ left: '32.8%' }}
-              ></div>
+              <div className="h-full bg-emerald-500/80 w-[20%]" title="Stable zone (0 - 0.10)"></div>
+              <div className="h-full bg-amber-500/80 w-[30%]" title="Warning zone (0.10 - 0.25)"></div>
+              <div className="h-full bg-red-500/80 w-[50%]" title="Drift detected (> 0.25)"></div>
+              {globalPsi != null && (
+                <div
+                  className="absolute top-0 bottom-0 w-1 bg-white shadow-[0_0_6px_#fff] z-10 -ml-0.5"
+                  style={{ left: psiNeedlePosition }}
+                ></div>
+              )}
             </div>
           </div>
 
@@ -185,125 +309,71 @@ export function DriftMonitoringPage() {
           </div>
         </div>
 
-        {/* Right: Drift Advisory Alert Callout */}
-        <div className="lg:col-span-8 bg-[#131D31] border border-amber-500/30 rounded-lg p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-sm relative overflow-hidden">
-          <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-amber-500"></div>
+        {/* Right: Selected Model Drift Summary */}
+        <div className={`lg:col-span-8 bg-[#131D31] rounded-lg p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-sm relative overflow-hidden border ${
+          psiCounts.drift > 0
+            ? 'border-red-500/30'
+            : psiCounts.warning > 0
+              ? 'border-amber-500/30'
+              : 'border-emerald-500/30'
+        }`}>
+          <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${psiCounts.drift > 0 ? 'bg-red-500' : psiCounts.warning > 0 ? 'bg-amber-500' : 'bg-emerald-500'}`}></div>
           <div className="flex items-center gap-3.5 pl-1">
-            <div className="w-10 h-10 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 flex items-center justify-center shrink-0">
-              <span className="material-symbols-outlined text-xl">notification_important</span>
+            <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${psiCounts.drift > 0 ? 'bg-red-500/10 border border-red-500/30 text-red-400' : psiCounts.warning > 0 ? 'bg-amber-500/10 border border-amber-500/30 text-amber-400' : 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-400'}`}>
+              <span className="material-symbols-outlined text-xl">{psiCounts.drift > 0 ? 'notification_important' : 'monitoring'}</span>
             </div>
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-sm font-semibold text-white font-sans">
-                  Feature Distribution Shift Detected
+                  {psiCounts.drift > 0 ? 'Feature Distribution Shift Detected' : psiCounts.warning > 0 ? 'Moderate Feature Shift' : latestFeatureReports.length ? 'No Significant Feature Shift' : 'No Drift Reports Yet'}
                 </h3>
-                <span className="px-1.5 py-0.2 rounded bg-amber-500/10 text-amber-400 text-[10px] font-sans border border-amber-500/30 font-medium">
-                  Requires Review
+                <span className={`px-1.5 py-0.2 rounded text-[10px] font-sans border font-medium ${psiStatusClasses[globalPsiStatus]}`}>
+                  {psiStatusLabels[globalPsiStatus]}
                 </span>
               </div>
               <p className="text-xs text-slate-400 mt-1 font-sans">
-                <span className="text-emerald-400 font-medium">44 Stable</span>
+                <span className="text-emerald-400 font-medium">{psiCounts.stable} Stable</span>
                 <span className="mx-1 text-slate-500">|</span>
-                <span className="text-amber-400 font-medium">3 Moderate Shift</span>
+                <span className="text-amber-400 font-medium">{psiCounts.warning} Warning</span>
                 <span className="mx-1 text-slate-500">|</span>
-                <span className="text-red-400 font-medium">
-                  1 Significant Drift:{' '}
-                  <code className="px-1 py-0.2 rounded bg-red-950/80 border border-red-800 text-red-300 font-mono text-[10px]">
-                    amt_ratio_to_avg
-                  </code>
-                </span>
+                <span className="text-red-400 font-medium">{psiCounts.drift} Significant Drift</span>
               </p>
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <span className="text-xs text-slate-400 font-mono">30-Day Window</span>
+            <span className="text-xs text-slate-400 font-mono">{selectedModelId || 'No model selected'}</span>
           </div>
         </div>
       </div>
 
-      {/* SECTION 2: 30-Day Drift Trajectory Chart */}
+      {/* SECTION 2: Current PSI by Feature */}
       <div className="bg-[#131D31] border border-[#1E293B] rounded-lg p-4 flex flex-col gap-3 shadow-sm">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <span className="material-symbols-outlined text-cyan-400 text-base">monitoring</span>
-            <h2 className="text-sm font-semibold text-white">
-              PSI Drift Trajectory across Feature Families (Rolling 30 Days)
-            </h2>
+            <h2 className="text-sm font-semibold text-white">Latest PSI by Feature</h2>
           </div>
-          <div className="flex items-center gap-3 text-xs font-medium flex-wrap">
-            <div className="flex items-center gap-1.5">
-              <span className="w-3 h-0.5 bg-cyan-400"></span>
-              <span className="text-slate-400">Amounts</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="w-3 h-0.5 bg-emerald-400"></span>
-              <span className="text-slate-400">Distances</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="w-3 h-0.5 bg-purple-400"></span>
-              <span className="text-slate-400">Velocity</span>
-            </div>
-            <div className="flex items-center gap-1.5 text-amber-400 text-[11px]">
-              <span className="w-3 border-b-2 border-dashed border-amber-500"></span>
-              <span>0.10 Warning</span>
-            </div>
-            <div className="flex items-center gap-1.5 text-red-400 text-[11px]">
-              <span className="w-3 border-b-2 border-dashed border-red-500"></span>
-              <span>0.25 Critical</span>
-            </div>
-          </div>
+          <span className="text-[10px] text-slate-400">Bar scale capped at PSI 0.50</span>
         </div>
 
-        {/* SVG Multi-Line Chart */}
-        <div className="relative w-full h-44 bg-[#0B111E] border border-[#1E293B] rounded-md p-2 overflow-hidden">
-          <div className="absolute inset-0 flex flex-col justify-between pointer-events-none p-3 pb-6">
-            <div className="border-b border-dashed border-red-500/60 w-full relative flex items-center justify-end">
-              <span className="bg-red-950/90 border border-red-800 text-red-300 text-[10px] font-mono px-1.5 py-0.2 rounded absolute -top-3 right-1">
-                Threshold: 0.25 Critical
-              </span>
-            </div>
-            <div className="border-b border-dashed border-amber-500/60 w-full relative flex items-center justify-end">
-              <span className="bg-amber-950/90 border border-amber-800 text-amber-300 text-[10px] font-mono px-1.5 py-0.2 rounded absolute -top-3 right-1">
-                Threshold: 0.10 Warning
-              </span>
-            </div>
-            <div className="border-b border-[#1E293B]/60 w-full"></div>
-            <div className="border-b border-[#1E293B] w-full"></div>
-          </div>
-
-          <svg className="w-full h-full" preserveAspectRatio="none" viewBox="0 0 1000 130">
-            {/* Categorical (cyan) */}
-            <path
-              d="M0,106 C150,102 300,108 450,100 C600,98 750,104 900,101 L1000,99"
-              fill="none"
-              stroke="#06B6D4"
-              strokeWidth="2"
-            />
-            {/* Numerical (emerald) */}
-            <path
-              d="M0,110 C180,104 350,96 500,94 C650,90 800,97 900,93 L1000,91"
-              fill="none"
-              stroke="#10B981"
-              strokeWidth="2"
-            />
-            {/* Velocity (purple/red surge crossing critical) */}
-            <path
-              d="M0,102 C150,100 320,96 480,92 C600,85 700,75 780,50 C850,26 920,18 1000,14"
-              fill="none"
-              stroke="#A855F7"
-              strokeWidth="2.5"
-            />
-            <circle cx="1000" cy="14" fill="#EF4444" r="5" stroke="#0B111E" strokeWidth="2" />
-            <circle cx="780" cy="50" fill="#F59E0B" r="4" stroke="#0B111E" strokeWidth="1.5" />
-          </svg>
-
-          <div className="absolute bottom-1 left-3 right-3 flex justify-between text-[11px] font-mono text-slate-500">
-            <span>Day -30</span>
-            <span>Day -22</span>
-            <span>Day -15</span>
-            <span className="text-amber-400">Day -7 (Anomaly)</span>
-            <span className="text-red-400 font-bold">Today (0.282 PSI)</span>
-          </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3">
+          {topFeatureReports.length === 0 ? (
+            <p className="md:col-span-2 py-6 text-center text-xs text-slate-400">
+              No drift checks are available for this model yet.
+            </p>
+          ) : topFeatureReports.map((report) => {
+            const score = Number(report.drift_score);
+            const barColor = score >= 0.25 ? 'bg-red-500' : score >= 0.10 ? 'bg-amber-400' : 'bg-emerald-500';
+            return (
+              <div key={report.report_id} className="grid grid-cols-[minmax(100px,1fr)_2fr_auto] items-center gap-3 text-xs">
+                <span className="truncate text-slate-300" title={report.feature_name}>{report.feature_name}</span>
+                <div className="h-2 rounded bg-[#0B111E] overflow-hidden">
+                  <div className={`h-full ${barColor}`} style={{ width: `${Math.min((score / 0.5) * 100, 100)}%` }}></div>
+                </div>
+                <span className="w-12 text-right font-mono text-white">{score.toFixed(2)}</span>
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -315,7 +385,7 @@ export function DriftMonitoringPage() {
             <h2 className="text-sm font-bold text-white">Feature Drift Ledger</h2>
             <span className="text-xs text-slate-400 font-mono">FastAPI /drift-reports</span>
           </div>
-          <span className="text-xs text-slate-400">Records: {driftReports.length}</span>
+          <span className="text-xs text-slate-400">Latest features: {latestFeatureReports.length}</span>
         </div>
 
         <div className="overflow-x-auto border border-[#1E293B] rounded">
@@ -331,7 +401,13 @@ export function DriftMonitoringPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-[#1E293B] font-mono">
-              {driftReports.map((r) => (
+              {latestFeatureReports.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
+                    No drift reports for this model. Run a drift check to calculate current PSI.
+                  </td>
+                </tr>
+              ) : latestFeatureReports.map((r) => (
                 <tr key={r.report_id} className="hover:bg-[#1A263D]/40 transition-colors">
                   <td className="px-4 py-2.5 font-bold text-cyan-400">#{r.report_id}</td>
                   <td className="px-4 py-2.5 text-slate-300">{r.model_id}</td>

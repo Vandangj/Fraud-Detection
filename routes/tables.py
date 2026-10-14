@@ -32,27 +32,27 @@ def get_table_row_counts(conn) -> Dict[str, int]:
     import time
     global _table_counts_cache, _cache_time
     now = time.time()
-    if _table_counts_cache and (now - _cache_time < 300): # 5 min cache
-        return _table_counts_cache
+    cache_is_fresh = bool(_table_counts_cache) and (now - _cache_time < 300)
+    counts = dict(_table_counts_cache) if cache_is_fresh else {}
 
-    counts = {}
-    try:
-        # Fast query via information_schema for MySQL
-        result = conn.execute(
-            select(
-                Table('tables', MetaData(), schema='information_schema', autoload_with=engine).c.table_name,
-                Table('tables', MetaData(), schema='information_schema', autoload_with=engine).c.table_rows
-            ).where(
-                Table('tables', MetaData(), schema='information_schema', autoload_with=engine).c.table_schema == 'fraud_detection'
-            )
-        ).fetchall()
-        for r in result:
-            counts[r[0]] = int(r[1] or 0)
-    except Exception:
-        pass
+    if not cache_is_fresh:
+        try:
+            # Fast query via information_schema for MySQL
+            result = conn.execute(
+                select(
+                    Table('tables', MetaData(), schema='information_schema', autoload_with=engine).c.table_name,
+                    Table('tables', MetaData(), schema='information_schema', autoload_with=engine).c.table_rows
+                ).where(
+                    Table('tables', MetaData(), schema='information_schema', autoload_with=engine).c.table_schema == 'fraud_detection'
+                )
+            ).fetchall()
+            for r in result:
+                counts[r[0]] = int(r[1] or 0)
+        except Exception:
+            pass
 
     # Exact counts for smaller tables
-    for small_t in ["models", "drift_reports", "frauds", "alerts", "users"]:
+    for small_t in ["models", "retraining_history", "drift_reports", "frauds", "alerts", "users"]:
         try:
             t_obj = metadata.tables.get(small_t)
             if t_obj is not None:
@@ -61,7 +61,8 @@ def get_table_row_counts(conn) -> Dict[str, int]:
             pass
 
     _table_counts_cache = counts
-    _cache_time = now
+    if not cache_is_fresh:
+        _cache_time = now
     return counts
 
 
