@@ -4,10 +4,20 @@ import MetricCard from '../components/Common/MetricCard';
 import StatusBadge from '../components/Common/StatusBadge';
 import Modal from '../components/Common/Modal';
 
-export function ModelHealthPage({ onTriggerRetrain }) {
+const isRetrainedVersion = (modelId) => {
+  const versionMatch = modelId?.match(
+    /^(?:rf-balanced|xgb-boosted|lgb-fast|gb-ensemble|lr-baseline)-v(\d+)$/
+  );
+  return Boolean(versionMatch && Number(versionMatch[1]) > 1);
+};
+
+export function ModelHealthPage({ onTriggerRetrain, initialModelId }) {
   const [models, setModels] = useState([]);
   const [comparisons, setComparisons] = useState([]);
-  const [selectedModelId, setSelectedModelId] = useState('rf-balanced-v1');
+  const [retrainingHistory, setRetrainingHistory] = useState([]);
+  const [selectedModelId, setSelectedModelId] = useState(initialModelId || 'rf-balanced-v1');
+  const [comparisonScope, setComparisonScope] = useState('new');
+  const [confusionView, setConfusionView] = useState('holdout');
   const [loading, setLoading] = useState(true);
   const [threshold, setThreshold] = useState(0.30);
   const [curveTab, setCurveTab] = useState('roc'); // 'roc' | 'pr' | 'comparison'
@@ -32,9 +42,10 @@ export function ModelHealthPage({ onTriggerRetrain }) {
   const loadModels = async () => {
     setLoading(true);
     try {
-      const [modelsRes, compRes] = await Promise.allSettled([
+      const [modelsRes, compRes, historyRes] = await Promise.allSettled([
         api.getModels(),
-        api.getModelsComparison()
+        api.getModelsComparison(),
+        api.getRetrainingHistory(),
       ]);
 
       if (modelsRes.status === 'fulfilled' && Array.isArray(modelsRes.value) && modelsRes.value.length > 0) {
@@ -43,9 +54,23 @@ export function ModelHealthPage({ onTriggerRetrain }) {
 
       if (compRes.status === 'fulfilled' && Array.isArray(compRes.value) && compRes.value.length > 0) {
         setComparisons(compRes.value);
-        if (!selectedModelId || !compRes.value.some(m => m.model_id === selectedModelId)) {
+        const newestRetrained = compRes.value
+          .filter((comparison) => isRetrainedVersion(comparison.model_id))
+          .sort((left, right) => (
+            new Date(right.model_training_time || 0).getTime()
+            - new Date(left.model_training_time || 0).getTime()
+          ));
+        if (initialModelId && compRes.value.some((comparison) => comparison.model_id === initialModelId)) {
+          setSelectedModelId(initialModelId);
+        } else if (comparisonScope === 'new' && newestRetrained.length > 0) {
+          setSelectedModelId(newestRetrained[0].model_id);
+        } else if (!selectedModelId || !compRes.value.some((comparison) => comparison.model_id === selectedModelId)) {
           setSelectedModelId(compRes.value[0].model_id);
         }
+      }
+
+      if (historyRes.status === 'fulfilled' && Array.isArray(historyRes.value)) {
+        setRetrainingHistory(historyRes.value);
       }
     } catch (err) {
       console.error('Error fetching models or comparison:', err);
@@ -89,6 +114,11 @@ export function ModelHealthPage({ onTriggerRetrain }) {
   // Active Model selection
   const activeModel = models.find((m) => m.model_id === selectedModelId) || models[0] || {};
   const activeComp = comparisons.find((c) => c.model_id === selectedModelId) || {};
+  const activeHistory = retrainingHistory.find((item) => item.model_id === selectedModelId);
+
+  useEffect(() => {
+    setConfusionView('holdout');
+  }, [selectedModelId]);
 
   const normalizeMetric = (value) => {
     const numericValue = Number(value);
@@ -103,8 +133,42 @@ export function ModelHealthPage({ onTriggerRetrain }) {
     const normalized = normalizeMetric(value);
     return normalized == null ? '—' : normalized.toFixed(4);
   };
+  const formatDateTime = (value) => {
+    if (!value) return '—';
+    const date = new Date(value);
+    return Number.isNaN(date.getTime())
+      ? '—'
+      : date.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+  };
 
-  const confusionMatrix = activeComp.confusion_matrix;
+  const comparisonRecords = comparisons.length > 0 ? comparisons : models;
+  const retrainedModels = comparisonRecords
+    .filter((comparison) => isRetrainedVersion(comparison.model_id))
+    .sort((left, right) => (
+      new Date(right.model_training_time || 0).getTime()
+      - new Date(left.model_training_time || 0).getTime()
+    ));
+  const showingNewOnly = comparisonScope === 'new' && retrainedModels.length > 0;
+  const displayedModels = showingNewOnly ? retrainedModels : comparisonRecords;
+  const retrainingHistoryRows = [...retrainingHistory].sort((left, right) => (
+    new Date(right.retrained_at).getTime() - new Date(left.retrained_at).getTime()
+  ));
+
+  const handleComparisonScopeChange = (event) => {
+    const nextScope = event.target.value;
+    setComparisonScope(nextScope);
+    if (
+      nextScope === 'new'
+      && retrainedModels.length > 0
+      && !retrainedModels.some((comparison) => comparison.model_id === selectedModelId)
+    ) {
+      setSelectedModelId(retrainedModels[0].model_id);
+    }
+  };
+
+  const confusionMatrix = confusionView === 'full-sample'
+    ? activeHistory?.full_sample_confusion_matrix
+    : activeComp.confusion_matrix;
   const hasConfusionMatrix = Array.isArray(confusionMatrix)
     && confusionMatrix.length === 2
     && confusionMatrix.every((row) => Array.isArray(row) && row.length === 2);
@@ -127,13 +191,20 @@ export function ModelHealthPage({ onTriggerRetrain }) {
   const confusionTotal = hasConfusionMatrix
     ? trueNegatives + falsePositives + falseNegatives + truePositives
     : null;
+  const splitDescription = activeHistory
+    ? confusionView === 'full-sample'
+      ? `Full sampled dataset (N = ${(activeHistory.full_sample_rows ?? confusionTotal)?.toLocaleString() ?? '—'}); includes training rows and is not a holdout score`
+      : `Holdout test split (N = ${(activeHistory.validation_rows ?? confusionTotal)?.toLocaleString() ?? '—'}); train split before SMOTE = ${activeHistory.training_rows?.toLocaleString() ?? '—'} rows`
+    : hasConfusionMatrix
+      ? `Benchmark confusion matrix (N = ${confusionTotal.toLocaleString()})`
+      : 'No confusion matrix reported for this model';
   const precisionMeetsTarget = precisionValue != null && normalizeMetric(precisionValue) >= 0.90;
   const recallMeetsTarget = recallValue != null && normalizeMetric(recallValue) >= 0.85;
 
   // Best performers
-  const bestF1 = comparisons.reduce((max, c) => (c.model_f1_score > (max?.model_f1_score || 0) ? c : max), null);
-  const bestAUC = comparisons.reduce((max, c) => (c.model_roc_auc > (max?.model_roc_auc || 0) ? c : max), null);
-  const fastestModel = comparisons.reduce((min, c) => (c.latency_ms < (min?.latency_ms || 999) ? c : min), null);
+  const bestF1 = displayedModels.reduce((max, comparison) => (comparison.model_f1_score > (max?.model_f1_score || 0) ? comparison : max), null);
+  const bestAUC = displayedModels.reduce((max, comparison) => (comparison.model_roc_auc > (max?.model_roc_auc || 0) ? comparison : max), null);
+  const fastestModel = displayedModels.reduce((min, comparison) => (comparison.latency_ms < (min?.latency_ms || 999) ? comparison : min), null);
 
   // Multi-model color mapping
   const modelColors = {
@@ -237,15 +308,42 @@ export function ModelHealthPage({ onTriggerRetrain }) {
                 Multi-Model Performance Comparison Matrix
               </h2>
               <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#0F172A] border border-[#1E293B] text-slate-300">
-                5 Algorithms Benchmarked
+                {displayedModels.length} {showingNewOnly ? 'Retrained Versions' : 'Models / Versions'}
               </span>
             </div>
             <p className="text-xs text-slate-400 mt-0.5">
-              Click any model row or button to activate its deep confusion matrix and decision threshold analysis below
+              {showingNewOnly
+                ? 'Showing retrained versions. Switch to all versions to include the original benchmark models.'
+                : 'Select a model to inspect its confusion matrix and validation metrics below.'}
             </p>
           </div>
-          <div className="text-xs font-mono text-cyan-400 bg-cyan-950/60 border border-cyan-800/80 px-2.5 py-1 rounded">
-            Active: <strong className="text-white">{activeModel.model_name || selectedModelId}</strong>
+          <div className="flex flex-wrap items-center gap-2">
+            <label>
+              <span className="sr-only">Comparison versions</span>
+              <select
+                value={comparisonScope}
+                onChange={handleComparisonScopeChange}
+                className="h-8 bg-[#0F172A] border border-[#334155] text-slate-200 rounded px-2 text-xs"
+              >
+                <option value="new">New retrained only</option>
+                <option value="all">All versions</option>
+              </select>
+            </label>
+            <label>
+              <span className="sr-only">Switch active model</span>
+              <select
+                value={selectedModelId}
+                onChange={(event) => setSelectedModelId(event.target.value)}
+                disabled={displayedModels.length === 0}
+                className="h-8 max-w-[260px] bg-[#0F172A] border border-[#334155] text-cyan-200 rounded px-2 text-xs"
+              >
+                {displayedModels.map((comparison) => (
+                  <option key={comparison.model_id} value={comparison.model_id}>
+                    {comparison.model_name || comparison.model_id}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
         </div>
 
@@ -266,7 +364,7 @@ export function ModelHealthPage({ onTriggerRetrain }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-[#1E293B] font-mono">
-              {(comparisons.length > 0 ? comparisons : models).map((m) => {
+              {displayedModels.map((m) => {
                 const isSelected = selectedModelId === m.model_id;
                 const color = modelColors[m.model_id] || '#06B6D4';
                 return (
@@ -330,6 +428,76 @@ export function ModelHealthPage({ onTriggerRetrain }) {
                       >
                         {isSelected ? 'Active Model' : 'Inspect'}
                       </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="bg-[#131D31] border border-[#1E293B] rounded-lg p-5 shadow-sm space-y-3">
+        <div className="flex items-center justify-between gap-3 pb-3 border-b border-[#1E293B]">
+          <div>
+            <h2 className="text-sm font-bold text-white">Retraining History</h2>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Validation results and completion times for registered retrained versions
+            </p>
+          </div>
+          <span className="text-[10px] font-mono text-cyan-300 bg-cyan-950/50 border border-cyan-800/60 px-2 py-1 rounded">
+            {retrainingHistoryRows.length} versions
+          </span>
+        </div>
+
+        <div className="overflow-x-auto border border-[#1E293B] rounded">
+          <table className="w-full text-left border-collapse text-xs min-w-[950px]">
+            <thead>
+              <tr className="bg-[#0F172A] h-9 text-[10px] font-semibold text-slate-400 uppercase tracking-wider border-b border-[#1E293B]">
+                <th className="px-3 py-2">Model Version</th>
+                <th className="px-3 py-2 text-right">Accuracy</th>
+                <th className="px-3 py-2 text-right">Precision</th>
+                <th className="px-3 py-2 text-right">Recall</th>
+                <th className="px-3 py-2 text-right">F1</th>
+                <th className="px-3 py-2 text-right">ROC-AUC</th>
+                <th className="px-3 py-2">TP / FP / FN / TN</th>
+                <th className="px-3 py-2 text-right">Training Time</th>
+                <th className="px-3 py-2">Retrained At</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#1E293B] font-mono">
+              {retrainingHistoryRows.length === 0 ? (
+                <tr>
+                  <td colSpan={9} className="px-3 py-8 text-center text-slate-400">
+                    No retrained versions recorded yet.
+                  </td>
+                </tr>
+              ) : retrainingHistoryRows.map((retrainedModel) => {
+                const matrix = retrainedModel.confusion_matrix;
+                const matrixAvailable = Array.isArray(matrix)
+                  && matrix.length === 2
+                  && matrix.every((row) => Array.isArray(row) && row.length === 2);
+                const matrixSummary = matrixAvailable
+                  ? `${matrix[1][1]} / ${matrix[0][1]} / ${matrix[1][0]} / ${matrix[0][0]}`
+                  : '—';
+                return (
+                  <tr key={retrainedModel.model_id} className="text-slate-300 hover:bg-[#1A263D]/50">
+                    <td className="px-3 py-2.5 text-cyan-300 whitespace-nowrap">{retrainedModel.model_id}</td>
+                    <td className="px-3 py-2.5 text-right">{formatPercent(retrainedModel.model_accuracy)}</td>
+                    <td className="px-3 py-2.5 text-right">{formatPercent(retrainedModel.model_precision)}</td>
+                    <td className="px-3 py-2.5 text-right">{formatPercent(retrainedModel.model_recall)}</td>
+                    <td className="px-3 py-2.5 text-right text-cyan-300">{formatScore(retrainedModel.model_f1_score)}</td>
+                    <td className="px-3 py-2.5 text-right text-purple-300">{formatScore(retrainedModel.model_roc_auc)}</td>
+                    <td className="px-3 py-2.5 whitespace-nowrap" title="True positives / false positives / false negatives / true negatives">
+                      {matrixSummary}
+                    </td>
+                    <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                      {retrainedModel.training_time_sec != null
+                        ? `${Number(retrainedModel.training_time_sec).toFixed(1)}s`
+                        : '—'}
+                    </td>
+                    <td className="px-3 py-2.5 whitespace-nowrap text-slate-300">
+                      {formatDateTime(retrainedModel.retrained_at)}
                     </td>
                   </tr>
                 );
@@ -600,14 +768,34 @@ export function ModelHealthPage({ onTriggerRetrain }) {
               <div>
                 <h2 className="text-sm font-bold text-white">Confusion Matrix Breakdown</h2>
                 <p className="text-[11px] text-slate-400 mt-0.5">
-                  {hasConfusionMatrix
-                    ? `Benchmark confusion matrix (N = ${confusionTotal.toLocaleString()})`
-                    : 'No confusion matrix reported for this model'}
+                  {splitDescription}
                 </p>
               </div>
-              <span className="text-[11px] font-mono bg-[#0F172A] text-cyan-300 px-2.5 py-1 rounded border border-[#1E293B] font-semibold">
-                {selectedModelId}
-              </span>
+              <div className="flex flex-col items-end gap-2">
+                <span className="text-[11px] font-mono bg-[#0F172A] text-cyan-300 px-2.5 py-1 rounded border border-[#1E293B] font-semibold">
+                  {selectedModelId}
+                </span>
+                {activeHistory?.full_sample_confusion_matrix && (
+                  <div className="inline-flex items-center bg-[#0F172A] p-0.5 rounded border border-[#1E293B]">
+                    <button
+                      type="button"
+                      onClick={() => setConfusionView('holdout')}
+                      aria-pressed={confusionView === 'holdout'}
+                      className={`px-2 py-1 text-[10px] rounded transition-colors ${confusionView === 'holdout' ? 'bg-cyan-500 text-slate-950 font-semibold' : 'text-slate-400 hover:text-white'}`}
+                    >
+                      Holdout Test
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfusionView('full-sample')}
+                      aria-pressed={confusionView === 'full-sample'}
+                      className={`px-2 py-1 text-[10px] rounded transition-colors ${confusionView === 'full-sample' ? 'bg-amber-400 text-slate-950 font-semibold' : 'text-slate-400 hover:text-white'}`}
+                    >
+                      Full Sample
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-3 my-3">

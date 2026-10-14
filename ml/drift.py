@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Iterable
 
 import numpy as np
@@ -24,6 +25,22 @@ SUPPORTED_FEATURES = {
     "type_PAYMENT": ("type_PAYMENT", "categorical"),
     "type_TRANSFER": ("type_TRANSFER", "categorical"),
 }
+
+DRIFT_REPORT_FEATURES = (
+    "step",
+    "amount",
+    "old_balance",
+    "new_balance",
+    "transaction_type",
+    "is_fraud",
+    "balanceDiffOrig",
+    "amountToOrigBalance",
+    "type_CASH_IN",
+    "type_CASH_OUT",
+    "type_DEBIT",
+    "type_PAYMENT",
+    "type_TRANSFER",
+)
 
 
 class InsufficientDriftDataError(ValueError):
@@ -180,3 +197,35 @@ def calculate_transaction_drift(
     # The existing MySQL drift_score column stores two decimal places.
     score = round(raw_score, 2)
     return score, classify_drift(score)
+
+
+def record_model_drift_reports(
+    db: Session,
+    model_id: str,
+    sample_size: int = 1000,
+) -> list:
+    """Persist a current PSI report for each supported feature and model version."""
+    checked_at = datetime.now()
+    reports = []
+    for feature_name in DRIFT_REPORT_FEATURES:
+        try:
+            drift_score, drift_status = calculate_transaction_drift(
+                db,
+                feature_name,
+                sample_size,
+            )
+        except InsufficientDriftDataError:
+            continue
+
+        report = db_models.drift_reports(
+            model_id=model_id,
+            feature_name=feature_name,
+            drift_score=drift_score,
+            drift_status=drift_status,
+            checked_at=checked_at,
+            report_time=checked_at,
+        )
+        db.add(report)
+        reports.append(report)
+
+    return reports

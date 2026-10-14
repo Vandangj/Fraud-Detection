@@ -18,6 +18,8 @@ function AppContent() {
   const [selectedCaseId, setSelectedCaseId] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [transactionCounts, setTransactionCounts] = useState(null);
+  const [isRetrainModalOpen, setIsRetrainModalOpen] = useState(false);
+  const [lastRetrainedModelId, setLastRetrainedModelId] = useState(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -43,6 +45,14 @@ function AppContent() {
 
   const handleRefreshData = () => {
     setRefreshKey((k) => k + 1);
+  };
+
+  const handleTriggerRetrain = () => setIsRetrainModalOpen(true);
+
+  const handleRetrainComplete = (results) => {
+    if (!Array.isArray(results) || results.length === 0) return;
+    setLastRetrainedModelId(results[results.length - 1].model_id);
+    handleRefreshData();
   };
 
   const handleTransactionCreated = (transaction, scoringResult) => {
@@ -90,6 +100,10 @@ function AppContent() {
       onSelectTab={setCurrentTab}
       pageTitle={getPageTitle()}
       onRefreshData={handleRefreshData}
+      onTriggerRetrain={handleTriggerRetrain}
+      isRetrainModalOpen={isRetrainModalOpen}
+      onCloseRetrain={() => setIsRetrainModalOpen(false)}
+      onRetrainComplete={handleRetrainComplete}
     >
       {currentTab === 'dashboard' && (
         <DashboardPage
@@ -121,7 +135,8 @@ function AppContent() {
       {currentTab === 'model-health' && (
         <ModelHealthPage
           key={`model-${refreshKey}`}
-          onTriggerRetrain={() => setCurrentTab('alerts')}
+          onTriggerRetrain={handleTriggerRetrain}
+          initialModelId={lastRetrainedModelId}
         />
       )}
 
@@ -138,6 +153,7 @@ function AppContent() {
           key={`alerts-${refreshKey}`}
           onNavigateTransactions={() => setCurrentTab('transactions')}
           onNavigateDrift={() => setCurrentTab('drift-monitoring')}
+          onTriggerRetrain={handleTriggerRetrain}
         />
       )}
 

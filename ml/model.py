@@ -2,6 +2,7 @@ import os
 import json
 import re
 import joblib
+import numpy as np
 from pathlib import Path
 
 os.makedirs("models", exist_ok=True)
@@ -88,13 +89,25 @@ def get_available_models():
 
 def get_comparison_metrics():
     """Load precomputed multi-model benchmark metrics from JSON."""
+    comparison_metrics = {}
     if os.path.exists(METRICS_PATH):
         try:
             with open(METRICS_PATH, "r") as f:
-                return json.load(f)
+                comparison_metrics.update(json.load(f))
         except Exception:
             pass
-    return {}
+
+    if RETRAINED_MODELS_DIR.exists():
+        for metadata_path in RETRAINED_MODELS_DIR.glob("*.json"):
+            if not RETRAINED_MODEL_ID.fullmatch(metadata_path.stem):
+                continue
+            try:
+                with metadata_path.open("r", encoding="utf-8") as metadata_file:
+                    comparison_metrics[metadata_path.stem] = json.load(metadata_file)
+            except (OSError, json.JSONDecodeError):
+                continue
+
+    return comparison_metrics
 
 
 def predict_fraud(data, model_id: str = "rf-balanced-v1"):
@@ -106,6 +119,28 @@ def predict_fraud(data, model_id: str = "rf-balanced-v1"):
     probability = selected.predict_proba(data)[:, 1]
     prediction = (probability >= threshold).astype(int)
     return prediction, probability
+
+
+def explain_tree_prediction(selected_model, data):
+    """Return class-1 TreeSHAP base value and feature contributions."""
+    import shap
+
+    explainer = shap.TreeExplainer(selected_model)
+    values = explainer.shap_values(data)
+    expected_value = np.asarray(explainer.expected_value)
+
+    if isinstance(values, list):
+        values = values[1] if len(values) > 1 else values[0]
+    values = np.asarray(values)
+    if values.ndim == 3:
+        values = values[:, :, 1] if values.shape[2] > 1 else values[:, :, 0]
+    if values.ndim == 2:
+        values = values[0]
+
+    if expected_value.ndim > 0:
+        expected_value = expected_value[1] if expected_value.size > 1 else expected_value.flat[0]
+
+    return float(expected_value), values.astype(float).tolist()
 
 
 def predict_all_models(data):

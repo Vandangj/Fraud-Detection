@@ -6,6 +6,7 @@ export function DatabaseTablesPage() {
   const [tablesList, setTablesList] = useState([]);
   const [selectedTable, setSelectedTable] = useState('frauds');
   const [tableData, setTableData] = useState(null);
+  const [modelComparisons, setModelComparisons] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
@@ -42,11 +43,49 @@ export function DatabaseTablesPage() {
     }
   }, [selectedTable, page, pageSize, sortBy, sortOrder, searchTerm, filterColumn, filterOperator, filterValue]);
 
+  useEffect(() => {
+    if (selectedTable !== 'models') {
+      setModelComparisons([]);
+      return;
+    }
+
+    let isCurrent = true;
+    api.getModelsComparison()
+      .then((data) => {
+        if (isCurrent && Array.isArray(data)) {
+          setModelComparisons(data);
+        }
+      })
+      .catch((err) => console.error('Failed to load model comparison metrics:', err));
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [selectedTable]);
+
   const loadTables = async () => {
     try {
-      const data = await api.getDatabaseTables();
+      const [data, transactionSummary, riskAlerts] = await Promise.all([
+        api.getDatabaseTables(),
+        api.getTransactionSummary().catch((err) => {
+          console.error('Failed to load transaction totals:', err);
+          return null;
+        }),
+        api.getRiskAlerts().catch((err) => {
+          console.error('Failed to load risk alerts:', err);
+          return [];
+        }),
+      ]);
       if (Array.isArray(data) && data.length > 0) {
-        setTablesList(data);
+        setTablesList(data.map((table) => {
+          if (table.table_name === 'transactions' && transactionSummary?.transaction_count != null) {
+            return { ...table, total_rows: transactionSummary.transaction_count };
+          }
+          if (table.table_name === 'alerts') {
+            return { ...table, total_rows: riskAlerts.length };
+          }
+          return table;
+        }));
         // Default to 'frauds' or first table if 'frauds' not found
         const hasFrauds = data.some((t) => t.table_name === 'frauds');
         if (!hasFrauds && data[0]) {
@@ -78,6 +117,71 @@ export function DatabaseTablesPage() {
         params.filter_column = filterColumn;
         params.filter_operator = filterOperator;
         params.filter_value = filterValue;
+      }
+
+      if (selectedTable === 'alerts') {
+        const alertRows = await api.getRiskAlerts();
+        let filteredRows = alertRows;
+
+        if (searchTerm) {
+          const search = searchTerm.toLowerCase();
+          filteredRows = filteredRows.filter((row) =>
+            Object.values(row).some((value) => String(value ?? '').toLowerCase().includes(search))
+          );
+        }
+
+        if (filterColumn && filterValue !== '') {
+          const expected = filterValue.toLowerCase();
+          filteredRows = filteredRows.filter((row) => {
+            const value = row[filterColumn];
+            const actual = String(value ?? '').toLowerCase();
+            const actualNumber = Number(value);
+            const expectedNumber = Number(filterValue);
+            switch (filterOperator) {
+              case 'eq': return actual === expected;
+              case 'neq': return actual !== expected;
+              case 'gt': return actualNumber > expectedNumber;
+              case 'gte': return actualNumber >= expectedNumber;
+              case 'lt': return actualNumber < expectedNumber;
+              case 'lte': return actualNumber <= expectedNumber;
+              case 'startswith': return actual.startsWith(expected);
+              case 'is_null': return value == null;
+              case 'not_null': return value != null;
+              case 'is_true': return Boolean(value) === true;
+              case 'is_false': return Boolean(value) === false;
+              case 'contains':
+              default: return actual.includes(expected);
+            }
+          });
+        }
+
+        if (sortBy) {
+          filteredRows.sort((left, right) => {
+            const comparison = String(left[sortBy] ?? '').localeCompare(String(right[sortBy] ?? ''), undefined, {
+              numeric: true,
+              sensitivity: 'base',
+            });
+            return sortOrder === 'asc' ? comparison : -comparison;
+          });
+        }
+
+        const columns = Object.keys(alertRows[0] || {
+          id: '', type: '', psi: 0, tag: '', title: '', message: '', impact: '',
+          timestamp: '', code: '', source: '', metric: '', actionLabel: '',
+        }).map((name) => ({ name, type: 'TEXT', primary_key: name === 'id' }));
+        const filteredCount = filteredRows.length;
+        const res = {
+          columns,
+          rows: filteredRows.slice((page - 1) * pageSize, page * pageSize),
+          total_rows: alertRows.length,
+          filtered_rows: filteredCount,
+          total_pages: Math.max(1, Math.ceil(filteredCount / pageSize)),
+        };
+        setTableData(res);
+        if (!visibleColumns.alerts || visibleColumns.alerts.length === 0) {
+          setVisibleColumns((prev) => ({ ...prev, alerts: columns.map((column) => column.name) }));
+        }
+        return;
       }
 
       const res = await api.getTableData(selectedTable, params);
@@ -213,6 +317,11 @@ export function DatabaseTablesPage() {
     setTimeout(() => setCopiedNotification(false), 2000);
   };
 
+  const modelComparisonById = useMemo(
+    () => new Map(modelComparisons.map((model) => [model.model_id, model])),
+    [modelComparisons]
+  );
+
   // Table presets by table
   const tablePresets = {
     frauds: [
@@ -295,6 +404,7 @@ export function DatabaseTablesPage() {
           const isSelected = selectedTable === t.table_name;
           const iconMap = {
             frauds: 'gavel',
+            alerts: 'notifications_active',
             drift_reports: 'ssid_chart',
             models: 'psychology',
             transactions: 'receipt_long',
@@ -700,19 +810,32 @@ export function DatabaseTablesPage() {
                 </tr>
               ) : (
                 tableData?.rows?.map((row, rowIdx) => {
+                  const comparison = selectedTable === 'models'
+                    ? modelComparisonById.get(row.model_id)
+                    : null;
+                  const displayRow = comparison
+                    ? {
+                        ...row,
+                        model_accuracy: comparison.model_accuracy,
+                        model_precision: comparison.model_precision,
+                        model_recall: comparison.model_recall,
+                        model_f1_score: comparison.model_f1_score,
+                        model_roc_auc: comparison.model_roc_auc,
+                      }
+                    : row;
                   const rowNum = (page - 1) * pageSize + rowIdx + 1;
                   return (
                     <tr
                       key={rowIdx}
                       className="hover:bg-[#152238]/60 transition-colors group cursor-pointer"
-                      onClick={() => setInspectRow(row)}
+                      onClick={() => setInspectRow(displayRow)}
                     >
                       <td className="px-3 py-2 text-center text-[10px] text-slate-500 font-sans">
                         {rowNum}
                       </td>
 
                       {activeCols.map((colName) => {
-                        const val = row[colName];
+                        const val = displayRow[colName];
                         let renderedVal = null;
 
                         if (val === null || val === undefined) {
@@ -779,7 +902,7 @@ export function DatabaseTablesPage() {
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            setInspectRow(row);
+                            setInspectRow(displayRow);
                           }}
                           className="px-2 py-0.5 rounded bg-[#0F172A] hover:bg-cyan-950 hover:text-cyan-300 text-slate-400 text-[10px] border border-[#1E293B] transition-colors"
                         >
