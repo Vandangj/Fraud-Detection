@@ -178,12 +178,6 @@ export function DashboardPage({ transactionCounts, onInspectCase, onNavigateTran
             </div>
 
             <svg className="w-full h-44 overflow-visible" preserveAspectRatio="none" viewBox="0 0 620 160">
-              <defs>
-                <linearGradient id="volBarGrad" x1="0" x2="0" y1="0" y2="1">
-                  <stop offset="0%" stopColor="#334155" stopOpacity="0.75" />
-                  <stop offset="100%" stopColor="#1E293B" stopOpacity="0.2" />
-                </linearGradient>
-              </defs>
               {/* Gridlines */}
               <line stroke="#1E293B" strokeWidth="1" x1="30" x2="600" y1="20" y2="20" />
               <line stroke="#1E293B" strokeWidth="1" x1="30" x2="600" y1="60" y2="60" />
@@ -201,9 +195,9 @@ export function DashboardPage({ transactionCounts, onInspectCase, onNavigateTran
               ].map((b, i) => (
                 <rect
                   key={i}
-                  fill="url(#volBarGrad)"
+                  fill="#625568"
                   height={b.h}
-                  stroke="#334155"
+                  stroke="#897891"
                   strokeWidth="0.5"
                   width="16"
                   x={b.x}
@@ -212,8 +206,8 @@ export function DashboardPage({ transactionCounts, onInspectCase, onNavigateTran
               ))}
 
               {/* Cutoff line at 0.70 */}
-              <line stroke="#EF4444" strokeDasharray="4 3" strokeWidth="1.5" x1="30" x2="600" y1="45" y2="45" />
-              <text fill="#EF4444" fontFamily="JetBrains Mono" fontSize="10" fontWeight="600" x="515" y="40">
+              <line stroke="#E0B36A" strokeDasharray="4 3" strokeWidth="1.5" x1="30" x2="600" y1="45" y2="45" />
+              <text fill="#E0B36A" fontFamily="JetBrains Mono" fontSize="10" fontWeight="600" x="515" y="40">
                 CUTOFF: 0.70
               </text>
 
@@ -221,12 +215,12 @@ export function DashboardPage({ transactionCounts, onInspectCase, onNavigateTran
               <path
                 d="M 40,115 Q 104,110 168,90 T 296,68 T 424,35 T 520,48 T 580,72"
                 fill="none"
-                stroke="#06B6D4"
+                stroke="#B97852"
                 strokeWidth="2.5"
               />
 
               {/* Spike Highlight */}
-              <circle cx="424" cy="35" fill="#EF4444" r="4" stroke="#0B111E" strokeWidth="2" />
+              <circle cx="424" cy="35" fill="#E06C75" r="4" stroke="#17181D" strokeWidth="2" />
               <rect fill="#080E1B" height="18" rx="3" stroke="#223049" strokeWidth="1" width="95" x="375" y="10" />
               <text fill="#F8FAFC" fontFamily="JetBrains Mono" fontSize="9" fontWeight="500" x="382" y="22">
                 Peak: 0.824
@@ -268,7 +262,7 @@ export function DashboardPage({ transactionCounts, onInspectCase, onNavigateTran
                     cy="40"
                     fill="transparent"
                     r="32"
-                    stroke="#10B981"
+                    stroke="#68B89A"
                     strokeDasharray="201"
                     strokeDashoffset="150"
                     strokeLinecap="round"
