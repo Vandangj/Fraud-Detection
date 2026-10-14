@@ -9,13 +9,95 @@ import crud
 import schemas
 import database_models as models
 from database import get_db
-from ml.model import model, features, threshold
+from ml.model import model, features, threshold, get_model, explain_tree_prediction
 
 
 router = APIRouter(
     prefix="/transactions",
     tags=["Transactions"]
 )
+
+
+@router.get("/{transaction_id}/explanation")
+def explain_transaction(
+    transaction_id: int = Path(ge=1, description="Transaction ID."),
+    db: Session = Depends(get_db),
+):
+    try:
+        transaction = crud.get_transaction(db, transaction_id)
+    except SQLAlchemyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Transaction could not be retrieved because the database is unavailable.",
+        ) from exc
+    if not transaction:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    if not features:
+        raise HTTPException(status_code=503, detail="Model feature metadata is unavailable")
+
+    amount = float(transaction.amount)
+    old_balance = float(transaction.old_balance or 0)
+    new_balance = float(transaction.new_balance or 0)
+    transaction_type = transaction.transaction_type.upper()
+    row = {
+        "step": transaction.step or 0,
+        "amount": amount,
+        "oldbalanceOrg": old_balance,
+        "newbalanceOrig": new_balance,
+        "oldbalanceDest": 0,
+        "newbalanceDest": 0,
+        "isFlaggedFraud": 0,
+        "balanceDiffOrig": old_balance - new_balance,
+        "balanceDiffDest": 0,
+        "amountToOrigBalance": amount / (old_balance + 1),
+        "amountToDestBalance": amount,
+        "type_CASH_OUT": int(transaction_type == "CASH_OUT"),
+        "type_DEBIT": int(transaction_type == "DEBIT"),
+        "type_PAYMENT": int(transaction_type == "PAYMENT"),
+        "type_TRANSFER": int(transaction_type == "TRANSFER"),
+    }
+    input_data = pd.DataFrame([row]).reindex(columns=features, fill_value=0)
+    selected_model = get_model("rf-balanced-v1")
+    if selected_model is None:
+        raise HTTPException(status_code=503, detail="Random Forest model is unavailable")
+
+    try:
+        base_value, shap_values = explain_tree_prediction(selected_model, input_data)
+        probability = float(selected_model.predict_proba(input_data)[0][1])
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="TreeSHAP is unavailable. Install the backend requirements.",
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Could not explain this transaction: {exc}") from exc
+
+    contributions = [
+        {
+            "feature": feature,
+            "value": float(row.get(feature, 0)),
+            "shap_value": float(shap_value),
+        }
+        for feature, shap_value in zip(features, shap_values)
+    ]
+    contributions.sort(key=lambda item: abs(item["shap_value"]), reverse=True)
+
+    assumptions = [
+        "Destination account balances are not stored for this transaction and were treated as 0.",
+        "The training flag isFlaggedFraud is not stored and was treated as 0.",
+    ]
+    if transaction.old_balance is None or transaction.new_balance is None:
+        assumptions.append("Missing sender balance values were treated as 0.")
+
+    return {
+        "transaction_id": transaction_id,
+        "model_id": "rf-balanced-v1",
+        "base_value": base_value,
+        "fraud_probability": probability,
+        "threshold": float(threshold),
+        "contributions": contributions[:8],
+        "assumptions": assumptions,
+    }
 
 
 @router.post(

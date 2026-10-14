@@ -11,10 +11,33 @@ export function CaseDetailPage({ transactionId, onBackToTransactions }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitFeedback, setSubmitFeedback] = useState(null);
   const [submitError, setSubmitError] = useState(null);
+  const [shapExplanation, setShapExplanation] = useState(null);
+  const [shapLoading, setShapLoading] = useState(false);
+  const [shapError, setShapError] = useState(null);
 
   useEffect(() => {
     loadCaseData();
   }, [transactionId]);
+
+  useEffect(() => {
+    if (!transaction?.transaction_id) return undefined;
+
+    let ignore = false;
+    setShapLoading(true);
+    setShapError(null);
+    api.getShapExplanation(transaction.transaction_id)
+      .then((data) => {
+        if (!ignore) setShapExplanation(data);
+      })
+      .catch((err) => {
+        if (!ignore) setShapError(err.message || 'TreeSHAP explanation is unavailable.');
+      })
+      .finally(() => {
+        if (!ignore) setShapLoading(false);
+      });
+
+    return () => { ignore = true; };
+  }, [transaction?.transaction_id]);
 
   const loadCaseData = async () => {
     setLoading(true);
@@ -122,6 +145,9 @@ export function CaseDetailPage({ transactionId, onBackToTransactions }) {
     transaction_type: 'TRANSFER',
     is_fraud: true,
   };
+  const modelProbability = shapExplanation ? Number(shapExplanation.fraud_probability) : null;
+  const modelThreshold = shapExplanation ? Number(shapExplanation.threshold) : null;
+  const isModelFraud = modelProbability !== null && modelProbability >= modelThreshold;
 
   return (
     <div className="space-y-5">
@@ -464,25 +490,29 @@ export function CaseDetailPage({ transactionId, onBackToTransactions }) {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
-              <div className="md:col-span-5 p-3.5 bg-red-950/30 border border-red-900/60 rounded-lg flex flex-col justify-between">
+              <div className={`md:col-span-5 p-3.5 rounded-lg flex flex-col justify-between ${
+                isModelFraud ? 'bg-red-950/30 border border-red-900/60' : 'bg-emerald-950/30 border border-emerald-900/60'
+              }`}>
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-red-300">Fraud Probability</span>
-                  <span className="px-2 py-0.5 bg-red-600 text-white font-semibold text-[10px] rounded">
-                    High Risk
+                  <span className={`text-xs font-semibold ${isModelFraud ? 'text-red-300' : 'text-emerald-300'}`}>Fraud Probability</span>
+                  <span className={`px-2 py-0.5 text-white font-semibold text-[10px] rounded ${isModelFraud ? 'bg-red-600' : 'bg-emerald-700'}`}>
+                    {modelProbability === null ? 'Loading' : isModelFraud ? 'High Risk' : 'Low Risk'}
                   </span>
                 </div>
                 <div className="my-2 flex items-baseline gap-1.5">
-                  <span className="text-3xl font-bold font-mono text-red-400 tracking-tight">0.842</span>
-                  <span className="text-xs text-red-300 font-mono">/ 1.000</span>
+                  <span className={`text-3xl font-bold font-mono tracking-tight ${isModelFraud ? 'text-red-400' : 'text-emerald-400'}`}>
+                    {modelProbability === null ? '—' : modelProbability.toFixed(3)}
+                  </span>
+                  <span className={`text-xs font-mono ${isModelFraud ? 'text-red-300' : 'text-emerald-300'}`}>/ 1.000</span>
                 </div>
                 <div>
-                  <div className="w-full bg-red-950/80 h-2 rounded-full relative overflow-hidden border border-red-900/50">
-                    <div className="bg-red-500 h-2 rounded-full" style={{ width: '84.2%' }}></div>
+                  <div className={`w-full h-2 rounded-full relative overflow-hidden border ${isModelFraud ? 'bg-red-950/80 border-red-900/50' : 'bg-emerald-950/80 border-emerald-900/50'}`}>
+                    <div className={`h-2 rounded-full ${isModelFraud ? 'bg-red-500' : 'bg-emerald-500'}`} style={{ width: `${(modelProbability || 0) * 100}%` }}></div>
                   </div>
-                  <div className="flex justify-between text-[10px] text-red-300 mt-1.5">
+                  <div className="flex justify-between text-[10px] text-slate-300 mt-1.5">
                     <span className="text-slate-400">Safe (0.0)</span>
-                    <span className="text-amber-300 font-mono">Threshold: 0.75</span>
-                    <span className="text-red-400 font-medium">Flagged (1.0)</span>
+                    <span className="text-amber-300 font-mono">Threshold: {modelThreshold === null ? '—' : modelThreshold.toFixed(2)}</span>
+                    <span className="font-medium">Flagged (1.0)</span>
                   </div>
                 </div>
               </div>
@@ -500,8 +530,8 @@ export function CaseDetailPage({ transactionId, onBackToTransactions }) {
                 </div>
                 <div className="p-2 bg-[#0F172A] border border-[#1E293B] rounded">
                   <span className="text-[10px] text-slate-400 block">Decision Threshold</span>
-                  <span className="font-semibold font-mono text-red-400 block">≥ 0.75 Flagged</span>
-                  <span className="text-[10px] text-slate-400">Recall Optimized</span>
+                  <span className="font-semibold font-mono text-red-400 block">≥ {modelThreshold === null ? '—' : modelThreshold.toFixed(2)} Flagged</span>
+                  <span className="text-[10px] text-slate-400">Active model cutoff</span>
                 </div>
                 <div className="p-2 bg-[#0F172A] border border-[#1E293B] rounded">
                   <span className="text-[10px] text-slate-400 block">Validation Metrics</span>
@@ -518,9 +548,7 @@ export function CaseDetailPage({ transactionId, onBackToTransactions }) {
             <div className="flex items-center justify-between pb-2 border-b border-[#1E293B]">
               <div className="flex items-center gap-2">
                 <span className="material-symbols-outlined text-cyan-400 text-base">waterfall_chart</span>
-                <h2 className="text-xs font-semibold text-white">
-                  Feature Explainability (TreeSHAP Template)
-                </h2>
+                <h2 className="text-xs font-semibold text-white">Feature Explainability (TreeSHAP)</h2>
               </div>
               <div className="flex items-center gap-3 text-xs">
                 <span className="flex items-center gap-1.5 text-slate-300">
@@ -534,57 +562,54 @@ export function CaseDetailPage({ transactionId, onBackToTransactions }) {
               </div>
             </div>
 
-            <div className="text-xs text-slate-300">
-              Base rate score <span className="text-white font-mono font-semibold">E[f(x)] = 0.12</span> shifted to{' '}
-              <span className="text-red-400 font-mono font-bold">f(x) = 0.842</span> by top features:
-            </div>
-
-            {/* Waterfall Bars */}
-            <div className="space-y-2 pt-1 text-xs">
-              <div className="p-2 rounded bg-[#0F172A] border border-[#1E293B]">
-                <div className="flex justify-between items-center mb-1">
-                  <span className="font-mono text-slate-200 text-xs">amt_ratio_to_avg (3.4x)</span>
-                  <span className="text-red-400 font-mono font-bold text-xs">+0.28</span>
-                </div>
-                <div className="w-full bg-[#161F33] h-2.5 rounded relative flex items-center">
-                  <div className="absolute left-[35%] top-0 bottom-0 w-0.5 bg-slate-600 z-10"></div>
-                  <div className="absolute left-[35%] h-2 bg-red-500 rounded-r" style={{ width: '48%' }}></div>
-                </div>
+            {shapLoading ? (
+              <div className="py-8 text-center text-xs text-slate-400">Calculating TreeSHAP values...</div>
+            ) : shapError ? (
+              <div className="p-3 border border-amber-700/50 bg-amber-950/30 rounded text-xs text-amber-200">
+                {shapError}
               </div>
+            ) : shapExplanation && (
+              <>
+                <div className="text-xs text-slate-300">
+                  Model score <span className="text-white font-mono font-semibold">E[f(x)] = {Number(shapExplanation.base_value).toFixed(3)}</span> shifted to{' '}
+                  <span className="text-red-400 font-mono font-bold">f(x) = {Number(shapExplanation.fraud_probability).toFixed(3)}</span> by these features:
+                </div>
 
-              <div className="p-2 rounded bg-[#0F172A] border border-[#1E293B]">
-                <div className="flex justify-between items-center mb-1">
-                  <span className="font-mono text-slate-200 text-xs">transaction_velocity_1h (4 txs)</span>
-                  <span className="text-red-400 font-mono font-bold text-xs">+0.21</span>
+                <div className="space-y-2 pt-1 text-xs">
+                  {(() => {
+                    const contributions = shapExplanation.contributions || [];
+                    const maxMagnitude = Math.max(...contributions.map((item) => Math.abs(item.shap_value)), 0.000001);
+                    return contributions.map((item) => {
+                      const positive = item.shap_value >= 0;
+                      const width = `${Math.max(Math.abs(item.shap_value) / maxMagnitude * 50, 1)}%`;
+                      return (
+                        <div key={item.feature} className="p-2 rounded bg-[#0F172A] border border-[#1E293B]">
+                          <div className="flex justify-between items-center mb-1 gap-3">
+                            <span className="font-mono text-slate-200 truncate">{item.feature} <span className="text-slate-500">({Number(item.value).toLocaleString(undefined, { maximumFractionDigits: 3 })})</span></span>
+                            <span className={`shrink-0 font-mono font-bold ${positive ? 'text-red-400' : 'text-emerald-400'}`}>
+                              {positive ? '+' : ''}{Number(item.shap_value).toFixed(4)}
+                            </span>
+                          </div>
+                          <div className="w-full bg-[#161F33] h-2.5 rounded relative flex items-center">
+                            <div className="absolute left-1/2 top-0 bottom-0 w-px bg-slate-500 z-10"></div>
+                            <div
+                              className={`absolute h-2 ${positive ? 'bg-red-500 rounded-r' : 'bg-emerald-500 rounded-l'}`}
+                              style={positive ? { left: '50%', width } : { right: '50%', width }}
+                            ></div>
+                          </div>
+                        </div>
+                      );
+                    });
+                  })()}
                 </div>
-                <div className="w-full bg-[#161F33] h-2.5 rounded relative flex items-center">
-                  <div className="absolute left-[35%] top-0 bottom-0 w-0.5 bg-slate-600 z-10"></div>
-                  <div className="absolute left-[35%] h-2 bg-red-500 rounded-r" style={{ width: '36%' }}></div>
-                </div>
-              </div>
 
-              <div className="p-2 rounded bg-[#0F172A] border border-[#1E293B]">
-                <div className="flex justify-between items-center mb-1">
-                  <span className="font-mono text-slate-200 text-xs">destination_step_diff</span>
-                  <span className="text-red-400 font-mono font-bold text-xs">+0.15</span>
-                </div>
-                <div className="w-full bg-[#161F33] h-2.5 rounded relative flex items-center">
-                  <div className="absolute left-[35%] top-0 bottom-0 w-0.5 bg-slate-600 z-10"></div>
-                  <div className="absolute left-[35%] h-2 bg-red-500 rounded-r" style={{ width: '26%' }}></div>
-                </div>
-              </div>
-
-              <div className="p-2 rounded bg-[#0F172A] border border-[#1E293B]">
-                <div className="flex justify-between items-center mb-1">
-                  <span className="font-mono text-slate-200 text-xs">account_age_days (420 days)</span>
-                  <span className="text-emerald-400 font-mono font-bold text-xs">-0.09 (protective)</span>
-                </div>
-                <div className="w-full bg-[#161F33] h-2.5 rounded relative flex items-center">
-                  <div className="absolute left-[35%] top-0 bottom-0 w-0.5 bg-slate-600 z-10"></div>
-                  <div className="absolute right-[65%] h-2 bg-emerald-500 rounded-l" style={{ width: '16%' }}></div>
-                </div>
-              </div>
-            </div>
+                {shapExplanation.assumptions?.length > 0 && (
+                  <div className="border-t border-[#1E293B] pt-2 space-y-1 text-[10px] text-amber-200/80">
+                    {shapExplanation.assumptions.map((assumption) => <p key={assumption}>{assumption}</p>)}
+                  </div>
+                )}
+              </>
+            )}
 
           </article>
         </div>

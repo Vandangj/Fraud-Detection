@@ -2,6 +2,7 @@ import os
 import json
 import re
 import joblib
+import numpy as np
 from pathlib import Path
 
 os.makedirs("models", exist_ok=True)
@@ -106,6 +107,28 @@ def predict_fraud(data, model_id: str = "rf-balanced-v1"):
     probability = selected.predict_proba(data)[:, 1]
     prediction = (probability >= threshold).astype(int)
     return prediction, probability
+
+
+def explain_tree_prediction(selected_model, data):
+    """Return class-1 TreeSHAP base value and feature contributions."""
+    import shap
+
+    explainer = shap.TreeExplainer(selected_model)
+    values = explainer.shap_values(data)
+    expected_value = np.asarray(explainer.expected_value)
+
+    if isinstance(values, list):
+        values = values[1] if len(values) > 1 else values[0]
+    values = np.asarray(values)
+    if values.ndim == 3:
+        values = values[:, :, 1] if values.shape[2] > 1 else values[:, :, 0]
+    if values.ndim == 2:
+        values = values[0]
+
+    if expected_value.ndim > 0:
+        expected_value = expected_value[1] if expected_value.size > 1 else expected_value.flat[0]
+
+    return float(expected_value), values.astype(float).tolist()
 
 
 def predict_all_models(data):

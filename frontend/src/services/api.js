@@ -243,9 +243,9 @@ export const api = {
       body: JSON.stringify(transactionData),
     }),
 
-  // SHAP Explainability — GET fraud prediction by transaction ID
+  // TreeSHAP explanation for a transaction
   getShapExplanation: (transactionId) =>
-    apiRequest(`/frauds/${transactionId}`),
+    apiRequest(`/transactions/${transactionId}/explanation`),
 
   // Trigger Model Retrain — POST /retrain
   triggerRetrainPipeline: () =>
