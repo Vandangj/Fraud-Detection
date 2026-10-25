@@ -1,0 +1,42 @@
+{
+  "model_id": "xgb-boosted-v3",
+  "source_model_id": "xgb-boosted-v1",
+  "model_name": "XGBoost Retrained v3",
+  "model_type": "XGBClassifier",
+  "version": 3,
+  "training_status": "completed",
+  "model_status": "evaluated",
+  "model_accuracy": 0.999206484158023,
+  "model_precision": 0.994535519125683,
+  "model_recall": 0.996956786366403,
+  "model_f1_score": 0.9957446808510638,
+  "model_roc_auc": 0.9993405356055995,
+  "training_time_sec": 11.085,
+  "threshold": 0.3,
+  "artifact_path": "C:\\Users\\vandan\\OneDrive\\Desktop\\Fraud detection\\models\\retrained\\xgb-boosted-v3.pkl",
+  "model_training_time": "2026-10-14T12:27:46.271441",
+  "confusion_matrix": [
+    [
+      15991,
+      9
+    ],
+    [
+      5,
+      1638
+    ]
+  ],
+  "full_sample_confusion_matrix": [
+    [
+      79984,
+      16
+    ],
+    [
+      18,
+      8195
+    ]
+  ],
+  "full_sample_rows": 88213,
+  "training_rows": 70570,
+  "validation_rows": 17643,
+  "drift_reports_created": 13
+}

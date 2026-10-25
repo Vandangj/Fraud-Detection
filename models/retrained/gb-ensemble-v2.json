@@ -1,0 +1,28 @@
+{
+  "model_id": "gb-ensemble-v2",
+  "source_model_id": "gb-ensemble-v1",
+  "model_name": "Gradient Boosting Retrained v2",
+  "model_type": "HistGradientBoostingClassifier",
+  "version": 2,
+  "training_status": "completed",
+  "model_status": "evaluated",
+  "model_accuracy": 0.9994898826730148,
+  "model_precision": 0.997563946406821,
+  "model_recall": 0.996956786366403,
+  "model_f1_score": 0.9972602739726028,
+  "model_roc_auc": 0.9988378157334143,
+  "training_time_sec": 16.311,
+  "threshold": 0.3,
+  "artifact_path": "C:\\Users\\vandan\\OneDrive\\Desktop\\Fraud detection\\models\\retrained\\gb-ensemble-v2.pkl",
+  "model_training_time": "2026-10-14T11:39:23.526918",
+  "confusion_matrix": [
+    [
+      15996,
+      4
+    ],
+    [
+      5,
+      1638
+    ]
+  ]
+}

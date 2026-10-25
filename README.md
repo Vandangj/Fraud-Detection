@@ -63,8 +63,12 @@ CREATE DATABASE fraud_detection;
 ### 1) Backend
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
+python -m venv venv
+# Windows:
+venv\Scripts\activate
+# macOS/Linux:
+source venv/bin/activate
+
 pip install -r requirements.txt
 ```
 
@@ -77,20 +81,24 @@ npm install
 
 ## Running the Application
 
-### Start the FastAPI backend
+> **Two separate terminals are required** — one for the backend, one for the frontend.
 
-From the project root:
+### Terminal 1 — Start the FastAPI backend
+
+From the project root (with venv activated):
 
 ```bash
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+cd "C:\Users\vandan\OneDrive\Desktop\project\Fraud detection"
+venv\Scripts\activate
+uvicorn main:app --host 127.0.0.1 --port 8080 --reload
 ```
 
 The API documentation will be available at:
 
-- http://localhost:8000/docs
-- http://localhost:8000/redoc
+- http://127.0.0.1:8080/docs
+- http://127.0.0.1:8080/redoc
 
-### Start the React frontend
+### Terminal 2 — Start the React frontend
 
 ```bash
 cd frontend
@@ -99,7 +107,9 @@ npm run dev
 
 Then open:
 
-- http://localhost:5173
+- http://localhost:5173 (or http://localhost:5174 if 5173 is already in use)
+
+The Vite dev server proxies all `/api` requests to the backend at `http://127.0.0.1:8080`.
 
 ## Loading Data
 
@@ -130,8 +140,9 @@ Common endpoints include:
 
 ## Notes
 
-- The frontend is configured for local development and expects the backend on `localhost:8000`.
-- CORS is enabled for the Vite frontend at `http://localhost:5173`.
+- The backend **must run on port 8080** (`--port 8080`). The Vite proxy in `frontend/vite.config.js` is configured to forward requests to `http://127.0.0.1:8080`.
+- CORS is enabled for the Vite frontend on both `http://localhost:5173` and `http://localhost:5174`.
+- Always activate the virtual environment (`venv\Scripts\activate`) before starting the backend.
 - This project is suitable for learning, demonstration, and further extension into a production-ready fraud monitoring system.
 
 ## License

@@ -26,9 +26,7 @@ def populate():
 
         print(f"[Populate] Available models: {model_ids}")
 
-        # ------------------------------------------------------------------
-        # 1. POPULATE FRAUDS TABLE
-        # ------------------------------------------------------------------
+        
         # Fetch fraud transactions (limit 250) and normal transactions (limit 250)
         print("[Populate] Fetching sample transactions for fraud prediction records...")
         fraud_txs = (

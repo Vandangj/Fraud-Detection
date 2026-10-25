@@ -1,0 +1,28 @@
+{
+  "model_id": "rf-balanced-v5",
+  "source_model_id": "rf-balanced-v1",
+  "model_name": "Random Forest Retrained v5",
+  "model_type": "RandomForestClassifier",
+  "version": 5,
+  "training_status": "completed",
+  "model_status": "evaluated",
+  "model_accuracy": 0.9991498044550247,
+  "model_precision": 0.9939320388349514,
+  "model_recall": 0.996956786366403,
+  "model_f1_score": 0.9954421148587056,
+  "model_roc_auc": 0.9991986647900182,
+  "training_time_sec": 13.704,
+  "threshold": 0.3,
+  "artifact_path": "C:\\Users\\vandan\\OneDrive\\Desktop\\Fraud detection\\models\\retrained\\rf-balanced-v5.pkl",
+  "model_training_time": "2026-10-14T11:38:42.176440",
+  "confusion_matrix": [
+    [
+      15990,
+      10
+    ],
+    [
+      5,
+      1638
+    ]
+  ]
+}

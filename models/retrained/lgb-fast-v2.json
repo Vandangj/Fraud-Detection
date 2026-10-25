@@ -1,0 +1,28 @@
+{
+  "model_id": "lgb-fast-v2",
+  "source_model_id": "lgb-fast-v1",
+  "model_name": "LightGBM Retrained v2",
+  "model_type": "LGBMClassifier",
+  "version": 2,
+  "training_status": "completed",
+  "model_status": "evaluated",
+  "model_accuracy": 0.9993765232670181,
+  "model_precision": 0.9963503649635036,
+  "model_recall": 0.996956786366403,
+  "model_f1_score": 0.9966534834195315,
+  "model_roc_auc": 0.9993660225197809,
+  "training_time_sec": 12.466,
+  "threshold": 0.3,
+  "artifact_path": "C:\\Users\\vandan\\OneDrive\\Desktop\\Fraud detection\\models\\retrained\\lgb-fast-v2.pkl",
+  "model_training_time": "2026-10-14T11:39:07.168168",
+  "confusion_matrix": [
+    [
+      15994,
+      6
+    ],
+    [
+      5,
+      1638
+    ]
+  ]
+}
