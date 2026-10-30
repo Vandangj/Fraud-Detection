@@ -15,6 +15,7 @@ from ml.model import get_comparison_metrics
 from ml.retraining import (
     ARTIFACT_DIR,
     DATASET_PATH,
+    SAMPLE_DATASET_PATH,
     InsufficientTrainingDataError,
     ModelTrainingError,
     SourceModelNotFoundError,
@@ -55,7 +56,8 @@ def _backfill_retraining_history(db: Session):
 
         try:
             if full_sample_data is None:
-                dataset = _load_stratified_data(DATASET_PATH, sample_non_fraud=80000)
+                dataset_file = DATASET_PATH if DATASET_PATH.is_file() else SAMPLE_DATASET_PATH
+                dataset = _load_stratified_data(dataset_file, sample_non_fraud=80000)
                 full_sample_data = _prepare_training_data(dataset)
             feature_frame, labels = full_sample_data
             estimator = joblib.load(artifact_path)

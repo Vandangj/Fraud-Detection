@@ -90,8 +90,12 @@ models/retrained/*.reserve
 # DATASETS / LARGE DATA
 # =========================
 
-data/
+# Exclude only large source datasets (>100MB)
+data/dataset.csv
 dataset.csv
+
+# Keep bundled lightweight dataset for remote retraining fallback
+!data/sample_dataset.csv
 
 # =========================
 # OS FILES

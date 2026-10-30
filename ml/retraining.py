@@ -23,6 +23,7 @@ from ml.drift import record_model_drift_reports
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DATASET_PATH = PROJECT_ROOT / "data" / "dataset.csv"
+SAMPLE_DATASET_PATH = PROJECT_ROOT / "data" / "sample_dataset.csv"
 FEATURES_PATH = PROJECT_ROOT / "models" / "features.pkl"
 ARTIFACT_DIR = PROJECT_ROOT / "models" / "retrained"
 PREDICTION_THRESHOLD = 0.30
@@ -230,7 +231,10 @@ def retrain_and_register(db, request: schemas.RetrainRequest) -> schemas.Retrain
         raise SourceModelNotFoundError(request.source_model_id)
 
     family, (model_type, display_name) = _family_for_model_id(request.source_model_id)
-    data = _load_stratified_data(Path(DATASET_PATH), request.sample_non_fraud)
+    dataset_file = DATASET_PATH if DATASET_PATH.is_file() else SAMPLE_DATASET_PATH
+    if not dataset_file.is_file():
+        raise FileNotFoundError("The configured training dataset is unavailable.")
+    data = _load_stratified_data(Path(dataset_file), request.sample_non_fraud)
     features, labels = _prepare_training_data(data)
 
     try:
