@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
@@ -10,8 +11,15 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL is not set in .env")
 
+# Pass SSL certificate if connecting to TiDB Cloud or remote MySQL
+connect_args = {}
+ca_path = Path(__file__).resolve().parent / "tidb-ca.pem"
+if ("localhost" not in DATABASE_URL and "127.0.0.1" not in DATABASE_URL) and ca_path.is_file():
+    connect_args["ssl"] = {"ca": str(ca_path)}
+
 engine = create_engine(
     DATABASE_URL,
+    connect_args=connect_args,
     pool_pre_ping=True
 )
 
