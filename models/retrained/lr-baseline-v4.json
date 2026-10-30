@@ -1,0 +1,42 @@
+{
+  "model_id": "lr-baseline-v4",
+  "source_model_id": "lr-baseline-v1",
+  "model_name": "Logistic Regression Retrained v4",
+  "model_type": "LogisticRegression",
+  "version": 4,
+  "training_status": "completed",
+  "model_status": "evaluated",
+  "model_accuracy": 0.9595306920591736,
+  "model_precision": 0.7123914037494284,
+  "model_recall": 0.9482653682288497,
+  "model_f1_score": 0.8135770234986945,
+  "model_roc_auc": 0.9899878271454656,
+  "training_time_sec": 28.903,
+  "threshold": 0.3,
+  "artifact_path": "C:\\Users\\vandan\\OneDrive\\Desktop\\project\\Fraud detection\\models\\retrained\\lr-baseline-v4.pkl",
+  "model_training_time": "2026-10-26T22:53:01.369322",
+  "confusion_matrix": [
+    [
+      15371,
+      629
+    ],
+    [
+      85,
+      1558
+    ]
+  ],
+  "full_sample_confusion_matrix": [
+    [
+      78637,
+      1363
+    ],
+    [
+      513,
+      7700
+    ]
+  ],
+  "full_sample_rows": 88213,
+  "training_rows": 70570,
+  "validation_rows": 17643,
+  "drift_reports_created": 13
+}
