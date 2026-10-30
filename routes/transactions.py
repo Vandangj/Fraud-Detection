@@ -202,14 +202,15 @@ def create_transaction(
     return db_tx
 
 
+_summary_cache = None
+_summary_cache_time = 0
+
+
 @router.get(
     "/summary",
     summary="Get transaction and fraud-prediction totals",
     description="Returns exact transaction and positive fraud-prediction counts for the overview.",
 )
-_summary_cache = None
-_summary_cache_time = 0
-
 def get_transaction_summary(db: Session = Depends(get_db)):
     global _summary_cache, _summary_cache_time
     now = time.time()
