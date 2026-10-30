@@ -4,7 +4,7 @@ import StatusBadge from '../components/Common/StatusBadge';
 import Modal from '../components/Common/Modal';
 import PendingNotice from '../components/Common/PendingNotice';
 
-export function TransactionsPage({ onInspectCase, onTransactionCreated, onTransactionDeleted }) {
+export function TransactionsPage({ onInspectCase, onTransactionCreated, onTransactionDeleted, onTransactionUpdated }) {
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -185,6 +185,7 @@ export function TransactionsPage({ onInspectCase, onTransactionCreated, onTransa
       }
 
       // 3. Update transaction state and UI
+      onTransactionUpdated?.();
       setTransactions((prev) => [newTx, ...prev]);
       onTransactionCreated?.(initiallyPersistedTransaction, scoringResult);
       setSelectedTx(newTx);
@@ -227,6 +228,7 @@ export function TransactionsPage({ onInspectCase, onTransactionCreated, onTransa
       const updated = await api.updateTransaction(tx.transaction_id, {
         is_fraud: !tx.is_fraud,
       });
+      onTransactionUpdated?.();
       setTransactions((prev) =>
         prev.map((t) => (t.transaction_id === tx.transaction_id ? updated : t))
       );
@@ -245,6 +247,7 @@ export function TransactionsPage({ onInspectCase, onTransactionCreated, onTransa
 
     try {
       await api.deleteTransaction(txId);
+      onTransactionUpdated?.();
       setTransactions((prev) => prev.filter((t) => t.transaction_id !== txId));
       onTransactionDeleted?.();
       if (selectedTx?.transaction_id === txId) {

@@ -7,6 +7,7 @@ export function DashboardPage({ transactionCounts, onInspectCase, onNavigateTran
   const [transactions, setTransactions] = useState([]);
   const [models, setModels] = useState([]);
   const [driftReports, setDriftReports] = useState([]);
+  const [summaryData, setSummaryData] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -16,10 +17,11 @@ export function DashboardPage({ transactionCounts, onInspectCase, onNavigateTran
   const loadDashboardData = async () => {
     setLoading(true);
     try {
-      const [txRes, modelRes, driftRes] = await Promise.allSettled([
+      const [txRes, modelRes, driftRes, summaryRes] = await Promise.allSettled([
         api.getTransactions(0, 50),
         api.getModelsComparison(),
         api.getDriftReports(),
+        api.getTransactionSummary(),
       ]);
 
       if (txRes.status === 'fulfilled' && Array.isArray(txRes.value)) {
@@ -31,6 +33,9 @@ export function DashboardPage({ transactionCounts, onInspectCase, onNavigateTran
       if (driftRes.status === 'fulfilled' && Array.isArray(driftRes.value)) {
         setDriftReports(driftRes.value);
       }
+      if (summaryRes.status === 'fulfilled' && summaryRes.value) {
+        setSummaryData(summaryRes.value);
+      }
     } catch (err) {
       console.error('Error loading dashboard data:', err);
     } finally {
@@ -39,8 +44,9 @@ export function DashboardPage({ transactionCounts, onInspectCase, onNavigateTran
   };
 
   // Metrics computation
-  const totalTxCount = transactionCounts?.transaction_count;
-  const flaggedCount = transactionCounts?.fraud_prediction_count;
+  const activeSummary = summaryData || transactionCounts;
+  const totalTxCount = activeSummary?.transaction_count;
+  const flaggedCount = activeSummary?.fraud_prediction_count;
   const fraudRate = totalTxCount
     ? ((flaggedCount / totalTxCount) * 100).toFixed(3)
     : null;

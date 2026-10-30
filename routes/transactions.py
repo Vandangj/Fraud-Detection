@@ -210,8 +210,13 @@ def get_transaction_summary(db: Session = Depends(get_db)):
     try:
         transaction_count = db.query(func.count(models.Transaction.transaction_id)).scalar() or 0
         fraud_prediction_count = (
-            db.query(func.count(models.Fraud_prediction.prediction_id))
-            .filter(models.Fraud_prediction.prediction.is_(True))
+            db.query(func.count(models.Transaction.transaction_id))
+            .filter(
+                (models.Transaction.is_fraud.is_(True))
+                | (models.Transaction.transaction_id.in_(
+                    db.query(models.Fraud_prediction.transaction_id).filter(models.Fraud_prediction.prediction.is_(True))
+                ))
+            )
             .scalar()
             or 0
         )
@@ -284,6 +289,27 @@ def update_transaction(
 ):
     try:
         updated = crud.update_transaction(db, transaction_id, transaction)
+        if updated and transaction.is_fraud is not None:
+            existing_pred = (
+                db.query(models.Fraud_prediction)
+                .filter(models.Fraud_prediction.transaction_id == transaction_id)
+                .first()
+            )
+            if existing_pred:
+                existing_pred.prediction = bool(transaction.is_fraud)
+                existing_pred.Fraud_score = 0.95 if transaction.is_fraud else 0.05
+                db.commit()
+            else:
+                new_pred = models.Fraud_prediction(
+                    transaction_id=transaction_id,
+                    model_id="rf-balanced-v1",
+                    Fraud_score=0.95 if transaction.is_fraud else 0.05,
+                    prediction=bool(transaction.is_fraud),
+                    threshold=float(threshold),
+                    prediction_time=datetime.now()
+                )
+                db.add(new_pred)
+                db.commit()
     except IntegrityError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

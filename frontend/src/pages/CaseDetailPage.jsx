@@ -3,7 +3,7 @@ import { api } from '../services/api';
 import StatusBadge from '../components/Common/StatusBadge';
 import PendingNotice from '../components/Common/PendingNotice';
 
-export function CaseDetailPage({ transactionId, onBackToTransactions }) {
+export function CaseDetailPage({ transactionId, onBackToTransactions, onTransactionUpdated }) {
   const [transaction, setTransaction] = useState(null);
   const [loading, setLoading] = useState(true);
   const [verdict, setVerdict] = useState('fraud');
@@ -120,6 +120,7 @@ export function CaseDetailPage({ transactionId, onBackToTransactions }) {
 
       setTransaction(updated);
       setVerdict(targetVerdict);
+      onTransactionUpdated?.();
 
       // Show clear, truthful feedback without fabricating note persistence
       setSubmitFeedback({

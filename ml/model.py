@@ -16,6 +16,24 @@ RETRAINED_MODEL_ID = re.compile(
     r"(?:rf-balanced|xgb-boosted|lgb-fast|gb-ensemble|lr-baseline)-v[1-9][0-9]*"
 )
 
+DEFAULT_FEATURES = [
+    "step",
+    "amount",
+    "oldbalanceOrg",
+    "newbalanceOrig",
+    "oldbalanceDest",
+    "newbalanceDest",
+    "isFlaggedFraud",
+    "balanceDiffOrig",
+    "balanceDiffDest",
+    "amountToOrigBalance",
+    "amountToDestBalance",
+    "type_CASH_OUT",
+    "type_DEBIT",
+    "type_PAYMENT",
+    "type_TRANSFER",
+]
+
 # Load primary baseline for backward compatibility
 try:
     model = joblib.load(MODEL_PATH)
@@ -24,8 +42,10 @@ except Exception:
 
 try:
     features = joblib.load(FEATURES_PATH)
+    if not features:
+        features = DEFAULT_FEATURES
 except Exception:
-    features = []
+    features = DEFAULT_FEATURES
 
 try:
     threshold = float(joblib.load(THRESHOLD_PATH))

@@ -32,7 +32,7 @@ function AppContent() {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [refreshKey, currentTab]);
 
   if (!user || !user.isAuthenticated) {
     return <LoginPage onLoginSuccess={() => setCurrentTab('dashboard')} />;
@@ -62,6 +62,7 @@ function AppContent() {
         + Number(Boolean(transaction.is_fraud))
         + Number(Boolean(scoringResult?.prediction)),
     }));
+    handleRefreshData();
   };
 
   const handleTransactionDeleted = () => {
@@ -69,6 +70,7 @@ function AppContent() {
       ...current,
       transaction_count: Math.max(0, current.transaction_count - 1),
     }));
+    handleRefreshData();
   };
 
   const getPageTitle = () => {
@@ -121,6 +123,7 @@ function AppContent() {
           onInspectCase={handleInspectCase}
           onTransactionCreated={handleTransactionCreated}
           onTransactionDeleted={handleTransactionDeleted}
+          onTransactionUpdated={handleRefreshData}
         />
       )}
 
@@ -129,6 +132,7 @@ function AppContent() {
           key={`case-${selectedCaseId}-${refreshKey}`}
           transactionId={selectedCaseId}
           onBackToTransactions={() => setCurrentTab('transactions')}
+          onTransactionUpdated={handleRefreshData}
         />
       )}
 

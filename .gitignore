@@ -30,9 +30,11 @@ dist/
 
 # Node dependencies
 node_modules/
+frontend/node_modules/
 
 # Vite / frontend build output
 frontend/dist/
+dist/
 
 # Frontend environment file
 frontend/.env
@@ -69,13 +71,20 @@ pnpm-debug.log*
 *.log
 *.tmp
 *.temp
+models/retrained/*.tmp
+models/retrained/*.reserve
 
 # =========================
 # ML MODEL FILES
 # =========================
 
-*.pkl
 *.joblib
+
+# Allow production model artifacts (all under 4MB, safe for GitHub)
+!models/*.pkl
+!models/metrics_comparison.json
+!models/retrained/*.pkl
+!models/retrained/*.json
 
 # =========================
 # DATASETS / LARGE DATA
