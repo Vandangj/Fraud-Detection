@@ -1,3 +1,4 @@
+import time
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from sqlalchemy import func
@@ -206,25 +207,40 @@ def create_transaction(
     summary="Get transaction and fraud-prediction totals",
     description="Returns exact transaction and positive fraud-prediction counts for the overview.",
 )
+_summary_cache = None
+_summary_cache_time = 0
+
 def get_transaction_summary(db: Session = Depends(get_db)):
+    global _summary_cache, _summary_cache_time
+    now = time.time()
+    if _summary_cache and (now - _summary_cache_time < 5):
+        return _summary_cache
+
     try:
         transaction_count = db.query(func.count(models.Transaction.transaction_id)).scalar() or 0
         fraud_prediction_count = (
             db.query(func.count(models.Transaction.transaction_id))
-            .filter(
-                (models.Transaction.is_fraud.is_(True))
-                | (models.Transaction.transaction_id.in_(
-                    db.query(models.Fraud_prediction.transaction_id).filter(models.Fraud_prediction.prediction.is_(True))
-                ))
-            )
+            .filter(models.Transaction.is_fraud.is_(True))
             .scalar()
             or 0
         )
-        return {
+        if fraud_prediction_count == 0:
+            fraud_prediction_count = (
+                db.query(func.count(models.Fraud_prediction.prediction_id))
+                .filter(models.Fraud_prediction.prediction.is_(True))
+                .scalar()
+                or 0
+            )
+        result = {
             "transaction_count": transaction_count,
             "fraud_prediction_count": fraud_prediction_count,
         }
+        _summary_cache = result
+        _summary_cache_time = now
+        return result
     except SQLAlchemyError as exc:
+        if _summary_cache:
+            return _summary_cache
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Transaction totals could not be retrieved because the database is unavailable.",

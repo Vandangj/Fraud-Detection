@@ -12,7 +12,7 @@ router = APIRouter(
 
 # Cache reflected metadata
 metadata = MetaData()
-metadata.reflect(bind=engine)
+# metadata.reflect(bind=engine)  # lazy load on demand
 
 
 def get_inspector():
