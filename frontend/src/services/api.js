@@ -11,6 +11,13 @@
  * or direct 'http://localhost:8000').
  */
 
+import {
+  PSI_WARNING,
+  PSI_DRIFT,
+  formatPsi,
+  latestReportsByModelFeature,
+} from '../utils/drift';
+
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '');
 
 async function apiRequest(endpoint, options = {}) {
@@ -67,25 +74,38 @@ export const api = {
   // ==========================================
   // Users API (/users)
   // ==========================================
-  getUsers: (skip = 0, limit = 100) => 
+  getUsers: (skip = 0, limit = 100) =>
     apiRequest(`/users/?skip=${skip}&limit=${limit}`),
 
-  getUser: (userId) => 
+  // Admin/analyst accounts only, newest first (persisted in the database).
+  // Use this on the Admin & Users page instead of getUsers(0, 100), which
+  // only returns the oldest 100 imported customers.
+  getStaffUsers: (accountType, skip = 0, limit = 200) => {
+    const query = new URLSearchParams({ skip, limit });
+    if (accountType) query.set('account_type', accountType);
+    return apiRequest(`/users/staff?${query.toString()}`);
+  },
+
+  // { admin: n, analyst: n, customer: n, staff: n, total: n }
+  getUserCounts: () =>
+    apiRequest('/users/counts'),
+
+  getUser: (userId) =>
     apiRequest(`/users/${userId}`),
 
-  createUser: (userData) => 
+  createUser: (userData) =>
     apiRequest('/users/', {
       method: 'POST',
       body: JSON.stringify(userData),
     }),
 
-  updateUser: (userId, userData) => 
+  updateUser: (userId, userData) =>
     apiRequest(`/users/${userId}`, {
       method: 'PUT',
       body: JSON.stringify(userData),
     }),
 
-  deleteUser: (userId) => 
+  deleteUser: (userId) =>
     apiRequest(`/users/${userId}`, {
       method: 'DELETE',
     }),
@@ -93,28 +113,28 @@ export const api = {
   // ==========================================
   // Transactions API (/transactions)
   // ==========================================
-  getTransactions: (skip = 0, limit = 100) => 
+  getTransactions: (skip = 0, limit = 100) =>
     apiRequest(`/transactions/?skip=${skip}&limit=${limit}`),
 
   getTransactionSummary: () =>
     apiRequest('/transactions/summary'),
 
-  getTransaction: (txId) => 
+  getTransaction: (txId) =>
     apiRequest(`/transactions/${txId}`),
 
-  createTransaction: (txData) => 
+  createTransaction: (txData) =>
     apiRequest('/transactions/', {
       method: 'POST',
       body: JSON.stringify(txData),
     }),
 
-  updateTransaction: (txId, txData) => 
+  updateTransaction: (txId, txData) =>
     apiRequest(`/transactions/${txId}`, {
       method: 'PUT',
       body: JSON.stringify(txData),
     }),
 
-  deleteTransaction: (txId) => 
+  deleteTransaction: (txId) =>
     apiRequest(`/transactions/${txId}`, {
       method: 'DELETE',
     }),
@@ -122,25 +142,25 @@ export const api = {
   // ==========================================
   // Models API (/models)
   // ==========================================
-  getModels: () => 
+  getModels: () =>
     apiRequest('/models/'),
 
-  getModel: (modelId) => 
+  getModel: (modelId) =>
     apiRequest(`/models/${modelId}`),
 
-  createModel: (modelData) => 
+  createModel: (modelData) =>
     apiRequest('/models/', {
       method: 'POST',
       body: JSON.stringify(modelData),
     }),
 
-  updateModel: (modelId, modelData) => 
+  updateModel: (modelId, modelData) =>
     apiRequest(`/models/${modelId}`, {
       method: 'PUT',
       body: JSON.stringify(modelData),
     }),
 
-  deleteModel: (modelId) => 
+  deleteModel: (modelId) =>
     apiRequest(`/models/${modelId}`, {
       method: 'DELETE',
     }),
@@ -148,19 +168,19 @@ export const api = {
   // ==========================================
   // Fraud Predictions API (/frauds)
   // ==========================================
-  getFraudPredictions: () => 
+  getFraudPredictions: () =>
     apiRequest('/frauds/'),
 
-  getFraudPrediction: (predictionId) => 
+  getFraudPrediction: (predictionId) =>
     apiRequest(`/frauds/${predictionId}`),
 
-  createFraudPrediction: (predData) => 
+  createFraudPrediction: (predData) =>
     apiRequest('/frauds/', {
       method: 'POST',
       body: JSON.stringify(predData),
     }),
 
-  deleteFraudPrediction: (predictionId) => 
+  deleteFraudPrediction: (predictionId) =>
     apiRequest(`/frauds/${predictionId}`, {
       method: 'DELETE',
     }),
@@ -168,7 +188,7 @@ export const api = {
   // ==========================================
   // Drift Reports API (/drift-reports)
   // ==========================================
-  getDriftReports: () => 
+  getDriftReports: () =>
     apiRequest('/drift-reports/'),
 
   checkDrift: (checkData) =>
@@ -177,14 +197,16 @@ export const api = {
       body: JSON.stringify(checkData),
     }),
 
+  // PSI alerts. Uses the LATEST report per (model, feature) so this list
+  // agrees with Overview and Drift Monitoring instead of listing stale history.
   getRiskAlerts: async () => {
     const reports = await apiRequest('/drift-reports/');
-    return (Array.isArray(reports) ? reports : [])
+    return latestReportsByModelFeature(reports)
       .map((report) => {
-        const psi = Number(report.drift_score);
-        if (!Number.isFinite(psi) || psi < 0.10) return null;
+        const psi = report.drift_score;
+        if (!Number.isFinite(psi) || psi < PSI_WARNING) return null;
 
-        const type = psi >= 0.25 ? 'risky' : 'moderate';
+        const type = psi >= PSI_DRIFT ? 'risky' : 'moderate';
         const date = report.report_time || report.checked_at;
         return {
           id: `DRIFT-${report.report_id}`,
@@ -192,16 +214,16 @@ export const api = {
           psi,
           tag: type.toUpperCase(),
           title: `${type === 'risky' ? 'Risky' : 'Moderate'} PSI: ${report.feature_name}`,
-          message: `Model ${report.model_id} recorded PSI ${psi.toFixed(3)} for ${report.feature_name}.`,
+          message: `Model ${report.model_id} recorded PSI ${formatPsi(psi)} for ${report.feature_name}.`,
           impact: type === 'risky'
-            ? `PSI ${psi.toFixed(3)} is at or above 0.25, the project's drift-detected threshold. Investigate this feature before relying on current model decisions.`
-            : `PSI ${psi.toFixed(3)} is in the moderate band (0.10 to less than 0.25). Monitor the next report and investigate if it rises to 0.25.`,
+            ? `PSI ${formatPsi(psi)} is at or above ${PSI_DRIFT.toFixed(2)}, the project's drift-detected threshold. Investigate this feature before relying on current model decisions.`
+            : `PSI ${formatPsi(psi)} is in the moderate band (${PSI_WARNING.toFixed(2)} to less than ${PSI_DRIFT.toFixed(2)}). Monitor the next report and investigate if it rises to ${PSI_DRIFT.toFixed(2)}.`,
           timestamp: date
             ? new Date(date).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
             : 'Time unavailable',
           code: report.model_id,
           source: `Drift report #${report.report_id}`,
-          metric: `PSI: ${psi.toFixed(3)}`,
+          metric: `PSI: ${formatPsi(psi)}`,
           actionLabel: 'Open drift monitoring',
         };
       })
@@ -212,16 +234,16 @@ export const api = {
       });
   },
 
-  getDriftReport: (reportId) => 
+  getDriftReport: (reportId) =>
     apiRequest(`/drift-reports/${reportId}`),
 
-  createDriftReport: (reportData) => 
+  createDriftReport: (reportData) =>
     apiRequest('/drift-reports/', {
       method: 'POST',
       body: JSON.stringify(reportData),
     }),
 
-  deleteDriftReport: (reportId) => 
+  deleteDriftReport: (reportId) =>
     apiRequest(`/drift-reports/${reportId}`, {
       method: 'DELETE',
     }),
@@ -295,4 +317,3 @@ export const api = {
 };
 
 export default api;
-

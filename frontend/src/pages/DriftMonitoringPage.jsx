@@ -3,6 +3,15 @@ import { api } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import StatusBadge from '../components/Common/StatusBadge';
 import Modal from '../components/Common/Modal';
+import {
+  PSI_WARNING,
+  PSI_DRIFT,
+  formatPsi,
+  classifyPsi,
+  latestReportsByFeature,
+  summarisePsi,
+  pickDefaultModelId,
+} from '../utils/drift';
 
 const DRIFT_FEATURES = [
   'step',
@@ -20,6 +29,33 @@ const DRIFT_FEATURES = [
   'type_TRANSFER',
 ];
 
+const PSI_STATUS_CLASSES = {
+  stable: 'bg-emerald-950/70 text-emerald-400 border-emerald-800/70',
+  warning: 'bg-amber-950/70 text-amber-300 border-amber-800/70',
+  drift_detected: 'bg-red-950/70 text-red-300 border-red-800/70',
+  unavailable: 'bg-slate-800 text-slate-300 border-slate-700',
+};
+
+const PSI_STATUS_LABELS = {
+  stable: 'STABLE',
+  warning: 'WARNING',
+  drift_detected: 'DRIFT DETECTED',
+  unavailable: 'NO REPORTS',
+};
+
+// StatusBadge understands these keys
+const BADGE_STATUS = {
+  stable: 'stable',
+  warning: 'warning',
+  drift_detected: 'critical',
+};
+
+const BADGE_LABEL = {
+  stable: 'stable',
+  warning: 'warning',
+  drift_detected: 'drift_detected',
+};
+
 export function DriftMonitoringPage() {
   const { user } = useAuth();
   const [driftReports, setDriftReports] = useState([]);
@@ -31,10 +67,10 @@ export function DriftMonitoringPage() {
   const [driftCheckFeedback, setDriftCheckFeedback] = useState(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [newReport, setNewReport] = useState({
-    model_id: 'rf_smote_v1.0',
-    feature_name: 'amt_ratio_to_avg',
+    model_id: 'rf-balanced-v1',
+    feature_name: 'amountToOrigBalance',
     drift_score: 0.14,
-    drift_status: 'Moderate',
+    drift_status: 'warning',
   });
 
   useEffect(() => {
@@ -47,14 +83,8 @@ export function DriftMonitoringPage() {
       const data = await api.getModels();
       if (!Array.isArray(data) || data.length === 0) return;
       setModels(data);
-      const configuredModelId = user?.modelEnvironment
-        ? `${user.modelEnvironment.replace(/-v\d+$/, '')}-v1`
-        : null;
-      const activeModel = data.find((model) => model.model_id === configuredModelId)
-        || data.find((model) => model.model_status?.toLowerCase() === 'active')
-        || data.find((model) => model.model_id === 'rf-balanced-v1')
-        || data[0];
-      const defaultModelId = activeModel.model_id
+      // Same default-model rule as the Overview page
+      const defaultModelId = pickDefaultModelId(data, user);
       setSelectedModelId((current) => current || defaultModelId);
       setNewReport((current) => ({ ...current, model_id: defaultModelId }));
     } catch (err) {
@@ -78,11 +108,13 @@ export function DriftMonitoringPage() {
   const handleCreateReport = async (e) => {
     e.preventDefault();
     try {
+      const score = parseFloat(newReport.drift_score);
       const payload = {
         model_id: newReport.model_id,
         feature_name: newReport.feature_name,
-        drift_score: parseFloat(newReport.drift_score),
-        drift_status: newReport.drift_status,
+        drift_score: score,
+        // Status always follows the score so every screen agrees
+        drift_status: classifyPsi(score),
       };
       const created = await api.createDriftReport(payload);
       setDriftReports((prev) => [created, ...prev]);
@@ -122,48 +154,18 @@ export function DriftMonitoringPage() {
     }
   };
 
-  const selectedModelReports = driftReports.filter(
-    (report) => report.model_id === selectedModelId
-  );
-  const latestReportsByFeature = selectedModelReports.reduce((latest, report) => {
-    const current = latest[report.feature_name];
-    const reportTime = new Date(report.report_time || report.checked_at || 0).getTime();
-    const currentTime = current
-      ? new Date(current.report_time || current.checked_at || 0).getTime()
-      : -1;
-    if (!current || reportTime >= currentTime) latest[report.feature_name] = report;
-    return latest;
-  }, {});
-  const latestFeatureReports = Object.values(latestReportsByFeature)
-    .sort((left, right) => Number(right.drift_score) - Number(left.drift_score));
-  const globalPsi = latestFeatureReports.length
-    ? latestFeatureReports.reduce((total, report) => total + Number(report.drift_score), 0) / latestFeatureReports.length
-    : null;
-  const globalPsiStatus = globalPsi == null
-    ? 'unavailable'
-    : globalPsi >= 0.25
-      ? 'drift_detected'
-      : globalPsi >= 0.10
-        ? 'warning'
-        : 'stable';
-  const psiCounts = latestFeatureReports.reduce((counts, report) => {
-    const score = Number(report.drift_score);
-    if (score >= 0.25) counts.drift += 1;
-    else if (score >= 0.10) counts.warning += 1;
-    else counts.stable += 1;
-    return counts;
-  }, { stable: 0, warning: 0, drift: 0 });
-  const psiStatusClasses = {
-    stable: 'bg-emerald-950/70 text-emerald-400 border-emerald-800/70',
-    warning: 'bg-amber-950/70 text-amber-300 border-amber-800/70',
-    drift_detected: 'bg-red-950/70 text-red-300 border-red-800/70',
-    unavailable: 'bg-slate-800 text-slate-300 border-slate-700',
-  };
-  const psiStatusLabels = {
-    stable: 'STABLE',
-    warning: 'WARNING',
-    drift_detected: 'DRIFT DETECTED',
-    unavailable: 'NO REPORTS',
+  // Shared logic with the Overview page
+  const latestFeatureReports = selectedModelId
+    ? latestReportsByFeature(driftReports, selectedModelId)
+        .sort((left, right) => right.drift_score - left.drift_score)
+    : [];
+  const psi = summarisePsi(latestFeatureReports);
+  const globalPsi = psi.mean;
+  const globalPsiStatus = psi.status;
+  const psiCounts = {
+    stable: psi.stableCount,
+    warning: psi.warningCount,
+    drift: psi.driftCount,
   };
   const psiNeedlePosition = globalPsi == null
     ? '0%'
@@ -265,15 +267,15 @@ export function DriftMonitoringPage() {
               </span>
               <div className="flex items-baseline gap-2 mt-1">
                 <span className="text-3xl font-mono font-bold text-white tracking-tight">
-                  {globalPsi == null ? '—' : globalPsi.toFixed(3)}
+                  {globalPsi == null ? '—' : formatPsi(globalPsi)}
                 </span>
-                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] font-semibold ${psiStatusClasses[globalPsiStatus]}`}>
+                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] font-semibold ${PSI_STATUS_CLASSES[globalPsiStatus]}`}>
                   <span className="w-1.5 h-1.5 rounded-full bg-current"></span>
-                  {psiStatusLabels[globalPsiStatus]}
+                  {PSI_STATUS_LABELS[globalPsiStatus]}
                 </span>
               </div>
             </div>
-              <span className="text-[10px] font-mono text-slate-400 px-1.5 py-0.5 rounded bg-[#0B111E] border border-[#1E293B]">
+            <span className="text-[10px] font-mono text-slate-400 px-1.5 py-0.5 rounded bg-[#0B111E] border border-[#1E293B]">
               Scale: 0.00–0.50 PSI
             </span>
           </div>
@@ -296,15 +298,15 @@ export function DriftMonitoringPage() {
           <div className="flex items-center justify-between text-[10px] font-mono text-slate-400 pt-3 border-t border-[#1E293B] mt-3">
             <span className="flex items-center gap-1">
               <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-              &lt;0.10 Stable
+              &lt;{PSI_WARNING.toFixed(2)} Stable
             </span>
             <span className="flex items-center gap-1">
               <span className="w-2 h-2 rounded-full bg-amber-400"></span>
-              0.10-0.25 Moderate
+              {PSI_WARNING.toFixed(2)}-{PSI_DRIFT.toFixed(2)} Moderate
             </span>
             <span className="flex items-center gap-1">
               <span className="w-2 h-2 rounded-full bg-red-400"></span>
-              &gt;0.25 Significant
+              &gt;{PSI_DRIFT.toFixed(2)} Significant
             </span>
           </div>
         </div>
@@ -327,8 +329,8 @@ export function DriftMonitoringPage() {
                 <h3 className="text-sm font-semibold text-white font-sans">
                   {psiCounts.drift > 0 ? 'Feature Distribution Shift Detected' : psiCounts.warning > 0 ? 'Moderate Feature Shift' : latestFeatureReports.length ? 'No Significant Feature Shift' : 'No Drift Reports Yet'}
                 </h3>
-                <span className={`px-1.5 py-0.2 rounded text-[10px] font-sans border font-medium ${psiStatusClasses[globalPsiStatus]}`}>
-                  {psiStatusLabels[globalPsiStatus]}
+                <span className={`px-1.5 py-0.2 rounded text-[10px] font-sans border font-medium ${PSI_STATUS_CLASSES[globalPsiStatus]}`}>
+                  {PSI_STATUS_LABELS[globalPsiStatus]}
                 </span>
               </div>
               <p className="text-xs text-slate-400 mt-1 font-sans">
@@ -359,18 +361,18 @@ export function DriftMonitoringPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3">
           {topFeatureReports.length === 0 ? (
             <p className="md:col-span-2 py-6 text-center text-xs text-slate-400">
-              No drift checks are available for this model yet.
+              {loading ? 'Loading drift reports...' : 'No drift checks are available for this model yet.'}
             </p>
           ) : topFeatureReports.map((report) => {
-            const score = Number(report.drift_score);
-            const barColor = score >= 0.25 ? 'bg-red-500' : score >= 0.10 ? 'bg-amber-400' : 'bg-emerald-500';
+            const score = report.drift_score;
+            const barColor = score >= PSI_DRIFT ? 'bg-red-500' : score >= PSI_WARNING ? 'bg-amber-400' : 'bg-emerald-500';
             return (
               <div key={report.report_id} className="grid grid-cols-[minmax(100px,1fr)_2fr_auto] items-center gap-3 text-xs">
                 <span className="truncate text-slate-300" title={report.feature_name}>{report.feature_name}</span>
                 <div className="h-2 rounded bg-[#0B111E] overflow-hidden">
                   <div className={`h-full ${barColor}`} style={{ width: `${Math.min((score / 0.5) * 100, 100)}%` }}></div>
                 </div>
-                <span className="w-12 text-right font-mono text-white">{score.toFixed(2)}</span>
+                <span className="w-12 text-right font-mono text-white">{formatPsi(score)}</span>
               </div>
             );
           })}
@@ -407,47 +409,41 @@ export function DriftMonitoringPage() {
                     No drift reports for this model. Run a drift check to calculate current PSI.
                   </td>
                 </tr>
-              ) : latestFeatureReports.map((r) => (
-                <tr key={r.report_id} className="hover:bg-[#1A263D]/40 transition-colors">
-                  <td className="px-4 py-2.5 font-bold text-cyan-400">#{r.report_id}</td>
-                  <td className="px-4 py-2.5 text-slate-300">{r.model_id}</td>
-                  <td className="px-4 py-2.5 font-semibold text-white font-sans">{r.feature_name}</td>
-                  <td className="px-4 py-2.5 text-center font-bold">
-                    <span
-                      className={
-                        r.drift_score >= 0.25
-                          ? 'text-red-400'
-                          : r.drift_score >= 0.1
-                          ? 'text-amber-400'
-                          : 'text-emerald-400'
-                      }
-                    >
-                      {r.drift_score}
-                    </span>
-                  </td>
-                  <td className="px-4 py-2.5 text-center font-sans">
-                    <StatusBadge
-                      status={
-                        r.drift_status?.toLowerCase().includes('critical') || r.drift_score >= 0.25
-                          ? 'critical'
-                          : r.drift_status?.toLowerCase().includes('moderate') || r.drift_score >= 0.1
-                          ? 'warning'
-                          : 'stable'
-                      }
-                      label={r.drift_status}
-                    />
-                  </td>
-                  <td className="px-4 py-2.5 text-right font-sans">
-                    <button
-                      onClick={() => handleDeleteReport(r.report_id)}
-                      className="px-2 py-0.5 rounded bg-slate-800 hover:bg-red-900/80 text-slate-400 hover:text-white text-xs transition-colors"
-                      type="button"
-                    >
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              ) : latestFeatureReports.map((r) => {
+                const status = classifyPsi(r.drift_score);
+                return (
+                  <tr key={r.report_id} className="hover:bg-[#1A263D]/40 transition-colors">
+                    <td className="px-4 py-2.5 font-bold text-cyan-400">#{r.report_id}</td>
+                    <td className="px-4 py-2.5 text-slate-300">{r.model_id}</td>
+                    <td className="px-4 py-2.5 font-semibold text-white font-sans">{r.feature_name}</td>
+                    <td className="px-4 py-2.5 text-center font-bold">
+                      <span
+                        className={
+                          status === 'drift_detected'
+                            ? 'text-red-400'
+                            : status === 'warning'
+                              ? 'text-amber-400'
+                              : 'text-emerald-400'
+                        }
+                      >
+                        {formatPsi(r.drift_score)}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2.5 text-center font-sans">
+                      <StatusBadge status={BADGE_STATUS[status]} label={BADGE_LABEL[status]} />
+                    </td>
+                    <td className="px-4 py-2.5 text-right font-sans">
+                      <button
+                        onClick={() => handleDeleteReport(r.report_id)}
+                        className="px-2 py-0.5 rounded bg-slate-800 hover:bg-red-900/80 text-slate-400 hover:text-white text-xs transition-colors"
+                        type="button"
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -495,30 +491,27 @@ export function DriftMonitoringPage() {
               </label>
               <input
                 type="number"
-                step="0.01"
+                step="0.001"
+                min="0"
                 required
                 value={newReport.drift_score}
                 onChange={(e) => {
                   const val = parseFloat(e.target.value) || 0;
-                  const status = val >= 0.25 ? 'Critical' : val >= 0.1 ? 'Moderate' : 'Stable';
-                  setNewReport({ ...newReport, drift_score: val, drift_status: status });
+                  setNewReport({ ...newReport, drift_score: val, drift_status: classifyPsi(val) });
                 }}
                 className="w-full h-8 px-2 bg-[#0F172A] border border-[#223049] rounded text-xs text-white focus:border-cyan-400 font-mono"
               />
             </div>
             <div>
               <label className="text-[10px] uppercase text-slate-400 block mb-1 font-semibold">
-                Drift Status
+                Drift Status (auto)
               </label>
-              <select
+              <input
+                type="text"
+                readOnly
                 value={newReport.drift_status}
-                onChange={(e) => setNewReport({ ...newReport, drift_status: e.target.value })}
-                className="w-full h-8 px-2 bg-[#0F172A] border border-[#223049] rounded text-xs text-white focus:border-cyan-400"
-              >
-                <option value="Stable">Stable (&lt; 0.10)</option>
-                <option value="Moderate">Moderate (0.10 - 0.25)</option>
-                <option value="Critical">Critical (&gt; 0.25)</option>
-              </select>
+                className="w-full h-8 px-2 bg-[#0F172A] border border-[#223049] rounded text-xs text-slate-300 font-mono"
+              />
             </div>
           </div>
 

@@ -1,9 +1,43 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 import MetricCard from '../components/Common/MetricCard';
 import StatusBadge from '../components/Common/StatusBadge';
+import {
+  PSI_WARNING,
+  PSI_DRIFT,
+  formatPsi,
+  classifyPsi,
+  latestReportsByFeature,
+  summarisePsi,
+  pickDefaultModelId,
+} from '../utils/drift';
+
+const PSI_STATUS_LABELS = {
+  stable: 'STABLE',
+  warning: 'WARNING',
+  drift_detected: 'DRIFT DETECTED',
+  unavailable: 'NO REPORTS',
+};
+
+const PSI_STATUS_CLASSES = {
+  stable: 'bg-emerald-950/60 text-emerald-400 border-emerald-800/60',
+  warning: 'bg-amber-950/60 text-amber-300 border-amber-800/60',
+  drift_detected: 'bg-red-950/60 text-red-300 border-red-800/60',
+  unavailable: 'bg-slate-800 text-slate-300 border-slate-700',
+};
+
+const PSI_GAUGE_COLORS = {
+  stable: '#68B89A',
+  warning: '#E0B36A',
+  drift_detected: '#E06C75',
+  unavailable: '#353640',
+};
+
+const GAUGE_CIRCUMFERENCE = 201;
 
 export function DashboardPage({ transactionCounts, onInspectCase, onNavigateTransactions, onNavigateDrift }) {
+  const { user } = useAuth();
   const [transactions, setTransactions] = useState([]);
   const [models, setModels] = useState([]);
   const [driftReports, setDriftReports] = useState([]);
@@ -51,8 +85,9 @@ export function DashboardPage({ transactionCounts, onInspectCase, onNavigateTran
     ? ((flaggedCount / totalTxCount) * 100).toFixed(3)
     : null;
 
-  // Active model
-  const activeModel = models.find((model) => model.model_id === 'rf-balanced-v1') || models[0] || {};
+  // Active model: same default-model rule as Drift Monitoring
+  const defaultModelId = pickDefaultModelId(models, user);
+  const activeModel = models.find((model) => model.model_id === defaultModelId) || {};
   const normalizeModelMetric = (value) => {
     const numericValue = Number(value);
     if (!Number.isFinite(numericValue)) return null;
@@ -66,6 +101,19 @@ export function DashboardPage({ transactionCounts, onInspectCase, onNavigateTran
     const normalized = normalizeModelMetric(value);
     return normalized == null ? '—' : normalized.toFixed(4);
   };
+
+  // PSI: computed from the same latest-per-feature reports as Drift Monitoring
+  const latestFeatureReports = defaultModelId
+    ? latestReportsByFeature(driftReports, defaultModelId)
+        .sort((left, right) => right.drift_score - left.drift_score)
+    : [];
+  const psi = summarisePsi(latestFeatureReports);
+  const gaugeFill = psi.mean == null ? 0 : Math.min(psi.mean / 0.5, 1);
+  const topDriftedFeatures = latestFeatureReports.slice(0, 2);
+  const driftWarnings = latestFeatureReports
+    .filter((report) => report.drift_score >= PSI_WARNING)
+    .slice(0, 3);
+
   return (
     <div className="space-y-6">
       {/* METRIC CARDS ROW (4 Cards) */}
@@ -109,7 +157,7 @@ export function DashboardPage({ transactionCounts, onInspectCase, onNavigateTran
             <span className="text-xs font-medium text-slate-400">Model Performance</span>
             <span className="inline-flex items-center gap-1 bg-emerald-950/60 text-emerald-400 border border-emerald-800/60 px-2 py-0.5 rounded text-[10px] font-sans font-medium">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-              Random Forest
+              {activeModel.model_id || 'Model'}
             </span>
           </div>
           <div className="my-2 flex items-baseline justify-between">
@@ -245,16 +293,18 @@ export function DashboardPage({ transactionCounts, onInspectCase, onNavigateTran
           </div>
         </div>
 
-        {/* RIGHT: Population Stability Index (PSI) */}
+        {/* RIGHT: Population Stability Index (PSI) - live data */}
         <div className="lg:col-span-5 bg-[#131D31] border border-[#1E293B] rounded-lg p-5 flex flex-col justify-between shadow-sm">
           <div>
             <div className="flex items-center justify-between pb-3 border-b border-[#1E293B]">
               <div>
                 <h2 className="text-sm font-bold text-slate-100">Population Stability Index</h2>
-                <p className="text-xs text-slate-400">Baseline cohort: 30-day window</p>
+                <p className="text-xs text-slate-400">
+                  Mean of latest feature reports · {defaultModelId || 'no model'}
+                </p>
               </div>
-              <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-emerald-950/60 text-emerald-400 border border-emerald-800/60 font-medium">
-                0.082 STABLE
+              <span className={`text-[11px] font-mono px-2 py-0.5 rounded border font-medium ${PSI_STATUS_CLASSES[psi.status]}`}>
+                {psi.mean == null ? '—' : formatPsi(psi.mean)} {PSI_STATUS_LABELS[psi.status]}
               </span>
             </div>
 
@@ -268,17 +318,19 @@ export function DashboardPage({ transactionCounts, onInspectCase, onNavigateTran
                     cy="40"
                     fill="transparent"
                     r="32"
-                    stroke="#68B89A"
-                    strokeDasharray="201"
-                    strokeDashoffset="150"
+                    stroke={PSI_GAUGE_COLORS[psi.status]}
+                    strokeDasharray={GAUGE_CIRCUMFERENCE}
+                    strokeDashoffset={GAUGE_CIRCUMFERENCE * (1 - gaugeFill)}
                     strokeLinecap="round"
                     strokeWidth="7"
                   />
                 </svg>
                 <div className="absolute flex flex-col items-center">
-                  <span className="text-base font-bold font-mono text-slate-100">0.082</span>
+                  <span className="text-base font-bold font-mono text-slate-100">
+                    {psi.mean == null ? '—' : formatPsi(psi.mean)}
+                  </span>
                   <span className="text-[8px] uppercase tracking-wider text-slate-400 font-semibold">
-                    PSI Score
+                    Mean PSI
                   </span>
                 </div>
               </div>
@@ -286,15 +338,21 @@ export function DashboardPage({ transactionCounts, onInspectCase, onNavigateTran
               <div className="flex flex-col gap-1 text-[11px] font-mono">
                 <div className="flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-                  <span className="text-slate-200 font-medium">&lt; 0.10: Stable</span>
+                  <span className="text-slate-200 font-medium">
+                    &lt; {PSI_WARNING.toFixed(2)}: Stable ({psi.stableCount})
+                  </span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-amber-400"></span>
-                  <span className="text-slate-400">0.10 - 0.25: Moderate</span>
+                  <span className="text-slate-400">
+                    {PSI_WARNING.toFixed(2)} - {PSI_DRIFT.toFixed(2)}: Moderate ({psi.warningCount})
+                  </span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-red-400"></span>
-                  <span className="text-slate-400">&gt; 0.25: Severe Drift</span>
+                  <span className="text-slate-400">
+                    &gt; {PSI_DRIFT.toFixed(2)}: Severe Drift ({psi.driftCount})
+                  </span>
                 </div>
               </div>
             </div>
@@ -304,29 +362,40 @@ export function DashboardPage({ transactionCounts, onInspectCase, onNavigateTran
               <span className="text-[11px] font-semibold text-slate-400 font-sans">
                 Top Drifted Features
               </span>
-              <div className="bg-[#0B111E] p-2 rounded border border-[#1E293B] flex flex-col gap-1">
-                <div className="flex items-center justify-between text-xs font-sans">
-                  <span className="text-slate-200 font-medium font-mono truncate">amt_ratio_to_avg</span>
-                  <span className="text-amber-400 text-[11px] font-semibold font-sans">
-                    PSI 0.14 • Moderate
-                  </span>
+              {topDriftedFeatures.length === 0 ? (
+                <div className="bg-[#0B111E] p-2 rounded border border-[#1E293B] text-xs text-slate-400 text-center">
+                  No drift reports for this model yet.
                 </div>
-                <div className="w-full bg-[#1E293B] h-1.5 rounded-full overflow-hidden">
-                  <div className="bg-amber-400 w-[56%] h-full"></div>
-                </div>
-              </div>
-
-              <div className="bg-[#0B111E] p-2 rounded border border-[#1E293B] flex flex-col gap-1">
-                <div className="flex items-center justify-between text-xs font-sans">
-                  <span className="text-slate-200 font-medium font-mono truncate">distance_from_home</span>
-                  <span className="text-emerald-400 text-[11px] font-semibold font-sans">
-                    PSI 0.04 • Stable
-                  </span>
-                </div>
-                <div className="w-full bg-[#1E293B] h-1.5 rounded-full overflow-hidden">
-                  <div className="bg-emerald-400 w-[18%] h-full"></div>
-                </div>
-              </div>
+              ) : topDriftedFeatures.map((report) => {
+                const status = classifyPsi(report.drift_score);
+                const textColor = status === 'drift_detected'
+                  ? 'text-red-400'
+                  : status === 'warning'
+                    ? 'text-amber-400'
+                    : 'text-emerald-400';
+                const barColor = status === 'drift_detected'
+                  ? 'bg-red-400'
+                  : status === 'warning'
+                    ? 'bg-amber-400'
+                    : 'bg-emerald-400';
+                const label = status === 'drift_detected' ? 'Severe' : status === 'warning' ? 'Moderate' : 'Stable';
+                return (
+                  <div key={report.report_id} className="bg-[#0B111E] p-2 rounded border border-[#1E293B] flex flex-col gap-1">
+                    <div className="flex items-center justify-between text-xs font-sans">
+                      <span className="text-slate-200 font-medium font-mono truncate">{report.feature_name}</span>
+                      <span className={`${textColor} text-[11px] font-semibold font-sans`}>
+                        PSI {formatPsi(report.drift_score)} • {label}
+                      </span>
+                    </div>
+                    <div className="w-full bg-[#1E293B] h-1.5 rounded-full overflow-hidden">
+                      <div
+                        className={`${barColor} h-full`}
+                        style={{ width: `${Math.min((report.drift_score / 0.5) * 100, 100)}%` }}
+                      ></div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
 
@@ -407,57 +476,18 @@ export function DashboardPage({ transactionCounts, onInspectCase, onNavigateTran
                 ))}
 
                 {transactions.length === 0 && (
-                  <>
-                    <tr className="hover:bg-[#1A263E]/50 transition-colors">
-                      <td className="py-2.5 px-3 font-semibold text-cyan-400">TX-849201</td>
-                      <td className="py-2.5 px-3 text-slate-200">ACC-SND-99201</td>
-                      <td className="py-2.5 px-3 text-slate-300">ACC-DST-44120</td>
-                      <td className="py-2.5 px-3 text-right font-medium text-slate-100 font-sans">
-                        $2,450.00
-                      </td>
-                      <td className="py-2.5 px-3 text-slate-300 font-sans">TRANSFER</td>
-                      <td className="py-2.5 px-3 text-center">
-                        <StatusBadge status="flagged" label="Flagged Fraud" />
-                      </td>
-                      <td className="py-2.5 px-3 text-right font-sans">
-                        <button
-                          onClick={() => onInspectCase(849201)}
-                          className="bg-cyan-500/10 border border-cyan-500/30 hover:bg-cyan-500/20 text-cyan-300 px-2.5 py-1 rounded text-xs transition-colors font-medium"
-                          type="button"
-                        >
-                          Inspect Case
-                        </button>
-                      </td>
-                    </tr>
-                    <tr className="hover:bg-[#1A263E]/50 transition-colors">
-                      <td className="py-2.5 px-3 font-semibold text-cyan-400">TX-849188</td>
-                      <td className="py-2.5 px-3 text-slate-200">ACC-SND-10845</td>
-                      <td className="py-2.5 px-3 text-slate-300">ACC-DST-88129</td>
-                      <td className="py-2.5 px-3 text-right font-medium text-slate-100 font-sans">
-                        $890.00
-                      </td>
-                      <td className="py-2.5 px-3 text-slate-300 font-sans">PAYMENT</td>
-                      <td className="py-2.5 px-3 text-center">
-                        <StatusBadge status="suspicious" label="Score 0.88" />
-                      </td>
-                      <td className="py-2.5 px-3 text-right font-sans">
-                        <button
-                          onClick={() => onInspectCase(849188)}
-                          className="bg-cyan-500/10 border border-cyan-500/30 hover:bg-cyan-500/20 text-cyan-300 px-2.5 py-1 rounded text-xs transition-colors font-medium"
-                          type="button"
-                        >
-                          Inspect Case
-                        </button>
-                      </td>
-                    </tr>
-                  </>
+                  <tr>
+                    <td colSpan={7} className="py-8 px-3 text-center text-slate-400 font-sans">
+                      {loading ? 'Loading transactions...' : 'No transactions found.'}
+                    </td>
+                  </tr>
                 )}
               </tbody>
             </table>
           </div>
         </div>
 
-        {/* RIGHT: Derived Risk & Drift Warnings */}
+        {/* RIGHT: Derived Drift Warnings (from real reports) */}
         <div className="lg:col-span-4 bg-[#131D31] border border-[#1E293B] rounded-lg p-5 flex flex-col justify-between shadow-sm">
           <div>
             <div className="flex items-center justify-between pb-3 border-b border-[#1E293B] mb-3">
@@ -475,52 +505,48 @@ export function DashboardPage({ transactionCounts, onInspectCase, onNavigateTran
             </div>
 
             <div className="flex flex-col gap-2.5">
-              <div className="p-2.5 bg-[#0B111E] border-l-2 border-l-amber-500 border border-[#1E293B] rounded flex flex-col gap-1.5">
-                <div className="flex items-center justify-between">
-                  <span className="bg-amber-950/80 border border-amber-800/70 text-amber-300 px-1.5 py-0.2 rounded font-sans text-[10px] font-semibold uppercase">
-                    DRIFT WARNING
-                  </span>
-                  <span className="text-[10px] font-mono text-slate-400">12m ago</span>
+              {driftWarnings.length === 0 && (
+                <div className="p-3 bg-[#0B111E] border border-[#1E293B] rounded text-xs text-slate-400 text-center font-sans">
+                  No feature has PSI at or above {PSI_WARNING.toFixed(2)} for {defaultModelId || 'this model'}.
                 </div>
-                <div className="text-xs text-slate-200 leading-snug font-sans">
-                  Moderate drift detected on <code className="font-mono text-cyan-300">amt_ratio_to_avg</code> (PSI: 0.14).
-                </div>
-                <div className="flex items-center justify-between pt-1 border-t border-[#1E293B] text-[11px] font-sans">
-                  <span className="text-slate-400">Covariate Shift</span>
-                  <button
-                    onClick={onNavigateDrift}
-                    className="bg-[#131D31] hover:bg-[#1E293B] text-slate-300 border border-[#1E293B] px-2 py-0.5 rounded text-[11px] transition-colors"
-                    type="button"
-                  >
-                    Inspect
-                  </button>
-                </div>
-              </div>
+              )}
 
-              <div className="p-2.5 bg-[#0B111E] border-l-2 border-l-red-500 border border-[#1E293B] rounded flex flex-col gap-1.5">
-                <div className="flex items-center justify-between">
-                  <span className="bg-red-950 text-red-400 border border-red-800/70 px-1.5 py-0.2 rounded font-sans text-[10px] font-bold uppercase">
-                    EVALUATION
-                  </span>
-                  <span className="text-[10px] font-mono text-slate-400">45m ago</span>
-                </div>
-                <div className="text-xs text-slate-200 leading-snug font-sans">
-                  Recall dipped below 90% threshold on card-not-present test split (88.1%).
-                </div>
-                <div className="flex items-center justify-between pt-1 border-t border-[#1E293B] text-[11px] font-sans">
-                  <span className="text-slate-400">Delta: -1.9%</span>
-                  <button
-                    onClick={onNavigateTransactions}
-                    className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-semibold px-2 py-0.5 rounded text-[11px] transition-colors"
-                    type="button"
+              {driftWarnings.map((report) => {
+                const isSevere = report.drift_score >= PSI_DRIFT;
+                const when = report.report_time || report.checked_at;
+                return (
+                  <div
+                    key={report.report_id}
+                    className={`p-2.5 bg-[#0B111E] border-l-2 ${isSevere ? 'border-l-red-500' : 'border-l-amber-500'} border border-[#1E293B] rounded flex flex-col gap-1.5`}
                   >
-                    Review Split
-                  </button>
-                </div>
-              </div>
+                    <div className="flex items-center justify-between">
+                      <span className={`${isSevere ? 'bg-red-950 text-red-400 border-red-800/70' : 'bg-amber-950/80 text-amber-300 border-amber-800/70'} border px-1.5 py-0.2 rounded font-sans text-[10px] font-semibold uppercase`}>
+                        {isSevere ? 'SEVERE DRIFT' : 'DRIFT WARNING'}
+                      </span>
+                      <span className="text-[10px] font-mono text-slate-400">
+                        {when ? new Date(when).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : ''}
+                      </span>
+                    </div>
+                    <div className="text-xs text-slate-200 leading-snug font-sans">
+                      {isSevere ? 'Significant' : 'Moderate'} drift detected on{' '}
+                      <code className="font-mono text-cyan-300">{report.feature_name}</code>{' '}
+                      (PSI: {formatPsi(report.drift_score)}).
+                    </div>
+                    <div className="flex items-center justify-between pt-1 border-t border-[#1E293B] text-[11px] font-sans">
+                      <span className="text-slate-400">Covariate Shift</span>
+                      <button
+                        onClick={onNavigateDrift}
+                        className="bg-[#131D31] hover:bg-[#1E293B] text-slate-300 border border-[#1E293B] px-2 py-0.5 rounded text-[11px] transition-colors"
+                        type="button"
+                      >
+                        Inspect
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
-
         </div>
       </section>
     </div>

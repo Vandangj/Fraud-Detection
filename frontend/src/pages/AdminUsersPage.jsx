@@ -4,10 +4,22 @@ import { useAuth } from '../context/AuthContext';
 import StatusBadge from '../components/Common/StatusBadge';
 import Modal from '../components/Common/Modal';
 
+const makeAccountId = () => `ACC-USR-${Date.now().toString().slice(-8)}`;
+
+const emptyNewUser = () => ({
+  account_id: makeAccountId(),
+  name: '',
+  account_type: 'Analyst',
+  email: '',
+  password_hash: 'hashed_demo_secret',
+});
+
 export function AdminUsersPage() {
   const { isAdmin } = useAuth();
   const [users, setUsers] = useState([]);
+  const [counts, setCounts] = useState({ admin: 0, analyst: 0, staff: 0, total: 0 });
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [selectedUser, setSelectedUser] = useState(null);
   const [roleFilter, setRoleFilter] = useState('ALL');
 
@@ -22,68 +34,53 @@ export function AdminUsersPage() {
 
   // Modal State for Adding User
   const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
-  const [newUser, setNewUser] = useState({
-    account_id: `ACC-USR-${Math.floor(1000 + Math.random() * 9000)}`,
-    name: '',
-    account_type: 'Analyst',
-    email: '',
-    password_hash: 'hashed_demo_secret',
-  });
+  const [newUser, setNewUser] = useState(emptyNewUser());
 
   useEffect(() => {
     loadUsers();
   }, []);
 
-  const loadUsers = async () => {
+  const applyRolePermissions = (role) => {
+    const isUserAdmin = (role || '').toLowerCase() === 'admin';
+    setPermissions({
+      review_cases: true,
+      trigger_retrain: isUserAdmin,
+      adjust_threshold: isUserAdmin,
+      manage_users: isUserAdmin,
+    });
+  };
+
+  // Always reads from the database, so list and counts survive a refresh.
+  // preferredUserId keeps/sets the selected row (e.g. the user just created).
+  const loadUsers = async (preferredUserId = null) => {
     setLoading(true);
+    setLoadError(null);
     try {
-      const data = await api.getUsers();
-      if (Array.isArray(data) && data.length > 0) {
-        setUsers(data);
-        setSelectedUser(data[0]);
-        setDrawerRole(data[0].account_type || 'Analyst');
-      } else {
-        // Fallback realistic user accounts
-        const defaultUsers = [
-          {
-            user_id: 1,
-            account_id: 'ACC-USR-1001',
-            name: 'Sarah Kowalski',
-            account_type: 'Analyst',
-            email: 's.kowalski@sentinel.edu',
-            created_at: new Date().toISOString(),
-          },
-          {
-            user_id: 2,
-            account_id: 'ACC-USR-1002',
-            name: 'Alex Mercer',
-            account_type: 'Admin',
-            email: 'a.mercer@sentinel.edu',
-            created_at: new Date().toISOString(),
-          },
-          {
-            user_id: 3,
-            account_id: 'ACC-USR-1003',
-            name: 'David Chen',
-            account_type: 'Admin',
-            email: 'd.chen@sentinel.edu',
-            created_at: new Date().toISOString(),
-          },
-          {
-            user_id: 4,
-            account_id: 'ACC-USR-1004',
-            name: 'Elena Martinez',
-            account_type: 'Analyst',
-            email: 'e.martinez@sentinel.edu',
-            created_at: new Date().toISOString(),
-          },
-        ];
-        setUsers(defaultUsers);
-        setSelectedUser(defaultUsers[0]);
-        setDrawerRole('Analyst');
-      }
+      const [staff, userCounts] = await Promise.all([
+        api.getStaffUsers(),
+        api.getUserCounts(),
+      ]);
+      const list = Array.isArray(staff) ? staff : [];
+      setUsers(list);
+      setCounts({
+        admin: userCounts?.admin ?? 0,
+        analyst: userCounts?.analyst ?? 0,
+        staff: userCounts?.staff ?? list.length,
+        total: userCounts?.total ?? list.length,
+      });
+
+      setSelectedUser((previous) => {
+        const targetId = preferredUserId ?? previous?.user_id;
+        const next = list.find((u) => u.user_id === targetId) || list[0] || null;
+        if (next) {
+          setDrawerRole(next.account_type || 'Analyst');
+          applyRolePermissions(next.account_type);
+        }
+        return next;
+      });
     } catch (err) {
       console.error('Failed to load users:', err);
+      setLoadError(err.message || 'Failed to load users from the database.');
     } finally {
       setLoading(false);
     }
@@ -91,15 +88,8 @@ export function AdminUsersPage() {
 
   const handleSelectUser = (u) => {
     setSelectedUser(u);
-    const role = u.account_type || 'Analyst';
-    setDrawerRole(role);
-    const isUserAdmin = role.toLowerCase() === 'admin';
-    setPermissions({
-      review_cases: true,
-      trigger_retrain: isUserAdmin,
-      adjust_threshold: isUserAdmin,
-      manage_users: isUserAdmin,
-    });
+    setDrawerRole(u.account_type || 'Analyst');
+    applyRolePermissions(u.account_type);
   };
 
   const handleCreateUser = async (e) => {
@@ -113,16 +103,10 @@ export function AdminUsersPage() {
         password_hash: newUser.password_hash,
       };
       const created = await api.createUser(payload);
-      setUsers((prev) => [...prev, created]);
-      setSelectedUser(created);
       setIsAddUserModalOpen(false);
-      setNewUser({
-        account_id: `ACC-USR-${Math.floor(1000 + Math.random() * 9000)}`,
-        name: '',
-        account_type: 'Analyst',
-        email: '',
-        password_hash: 'hashed_demo_secret',
-      });
+      setNewUser(emptyNewUser());
+      // Re-fetch from the database instead of only appending to local state
+      await loadUsers(created?.user_id);
     } catch (err) {
       alert(`Failed to create user: ${err.message}`);
     }
@@ -131,14 +115,11 @@ export function AdminUsersPage() {
   const handleSavePermissions = async () => {
     if (!selectedUser) return;
     try {
-      const updated = await api.updateUser(selectedUser.user_id, {
+      await api.updateUser(selectedUser.user_id, {
         account_type: drawerRole,
       });
-      setUsers((prev) =>
-        prev.map((u) => (u.user_id === selectedUser.user_id ? { ...u, account_type: drawerRole } : u))
-      );
-      setSelectedUser((prev) => ({ ...prev, account_type: drawerRole }));
-      alert(`Permissions saved for ${selectedUser.name}!`);
+      await loadUsers(selectedUser.user_id);
+      alert(`Role saved for ${selectedUser.name}!`);
     } catch (err) {
       alert(`Failed to update permissions: ${err.message}`);
     }
@@ -148,10 +129,10 @@ export function AdminUsersPage() {
     if (!window.confirm(`Delete user #${userId} from database?`)) return;
     try {
       await api.deleteUser(userId);
-      setUsers((prev) => prev.filter((u) => u.user_id !== userId));
       if (selectedUser?.user_id === userId) {
         setSelectedUser(null);
       }
+      await loadUsers();
     } catch (err) {
       alert(`Failed to delete user: ${err.message}`);
     }
@@ -162,8 +143,10 @@ export function AdminUsersPage() {
     return u.account_type?.toLowerCase() === roleFilter.toLowerCase();
   });
 
-  const adminCount = users.filter((u) => u.account_type?.toLowerCase() === 'admin').length;
-  const analystCount = users.filter((u) => u.account_type?.toLowerCase() === 'analyst').length;
+  // Counts come from the database (not the length of a truncated list)
+  const adminCount = counts.admin;
+  const analystCount = counts.analyst;
+  const staffCount = counts.staff;
 
   return (
     <div className="space-y-5">
@@ -193,6 +176,19 @@ export function AdminUsersPage() {
         </button>
       </section>
 
+      {loadError && (
+        <div role="alert" className="p-3 rounded-lg border border-red-700/60 bg-red-950/40 text-red-200 text-xs flex items-center justify-between gap-3">
+          <span>Could not load users from the database: {loadError}</span>
+          <button
+            onClick={() => loadUsers()}
+            type="button"
+            className="px-2.5 py-1 rounded bg-[#0F172A] border border-[#223049] text-slate-200 text-[11px]"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
       {/* Top 3 Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="p-4 rounded-lg bg-[#131D31] border border-[#1E293B] flex flex-col justify-between shadow-sm">
@@ -203,14 +199,14 @@ export function AdminUsersPage() {
             <span className="material-symbols-outlined text-cyan-400 text-base">group</span>
           </div>
           <div className="mt-2 flex items-baseline justify-between">
-            <span className="text-xl font-bold text-white font-mono">{users.length} Users</span>
+            <span className="text-xl font-bold text-white font-mono">{staffCount} Users</span>
             <span className="text-[11px] font-mono text-cyan-300 bg-cyan-950/70 border border-cyan-800/40 px-2 py-0.5 rounded">
               {adminCount} Admins · {analystCount} Analysts
             </span>
           </div>
           <span className="text-[11px] text-slate-400 mt-2 flex items-center gap-1">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-            Local Authentication (MySQL hashed credentials)
+            Stored in the database ({counts.total.toLocaleString()} total accounts)
           </span>
         </div>
 
@@ -243,7 +239,7 @@ export function AdminUsersPage() {
             <span className="material-symbols-outlined text-cyan-400 text-base">database</span>
           </div>
           <div className="mt-2 flex items-baseline justify-between">
-            <span className="text-xl font-bold text-white font-mono">MySQL Local</span>
+            <span className="text-xl font-bold text-white font-mono">MySQL / TiDB</span>
             <span className="text-[11px] font-mono text-cyan-300 bg-cyan-950/70 border border-cyan-800/40 px-2 py-0.5 rounded">
               users Table
             </span>
@@ -295,6 +291,13 @@ export function AdminUsersPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#1E293B]">
+                {filteredUsers.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="py-8 px-3 text-center text-slate-400">
+                      {loading ? 'Loading users...' : 'No admin or analyst accounts yet. Create one to get started.'}
+                    </td>
+                  </tr>
+                )}
                 {filteredUsers.map((u) => {
                   const isSelected = selectedUser?.user_id === u.user_id;
                   const initials = u.name
@@ -623,6 +626,7 @@ export function AdminUsersPage() {
             <input
               type="text"
               required
+              maxLength={50}
               value={newUser.account_id}
               onChange={(e) => setNewUser({ ...newUser, account_id: e.target.value })}
               className="w-full h-8 px-2.5 bg-[#0F172A] border border-[#223049] rounded text-xs text-white focus:border-cyan-400 font-mono"
@@ -636,6 +640,7 @@ export function AdminUsersPage() {
             <input
               type="text"
               required
+              maxLength={50}
               placeholder="e.g. Jordan Lee"
               value={newUser.name}
               onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
@@ -650,6 +655,7 @@ export function AdminUsersPage() {
             <input
               type="email"
               required
+              maxLength={50}
               placeholder="user@sentinel.edu"
               value={newUser.email}
               onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}

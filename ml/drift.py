@@ -42,6 +42,10 @@ DRIFT_REPORT_FEATURES = (
     "type_TRANSFER",
 )
 
+# Number of decimals stored for PSI. Must match drift_reports.drift_score
+# column scale (DECIMAL(15,4)) and the frontend formatter.
+PSI_DECIMALS = 4
+
 
 class InsufficientDriftDataError(ValueError):
     pass
@@ -194,8 +198,9 @@ def calculate_transaction_drift(
         categorical,
     )
 
-    # The existing MySQL drift_score column stores two decimal places.
-    score = round(raw_score, 2)
+    # Store/classify on the SAME rounded value so the number shown in the UI
+    # always agrees with the status badge. drift_score column is DECIMAL(15,4).
+    score = round(raw_score, PSI_DECIMALS)
     return score, classify_drift(score)
 
 

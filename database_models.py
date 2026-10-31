@@ -9,7 +9,7 @@ class User(Base):
     user_id = Column(Integer, primary_key=True, index=True)
     account_id = Column(String(50), unique=True, index=True)
     name = Column(String(50))
-    account_type = Column(String(50))
+    account_type = Column(String(50), index=True)
     email = Column(String(50), unique=True, index=True)
     password_hash = Column(String(255))
     created_at = Column(DateTime)
@@ -99,7 +99,9 @@ class drift_reports(Base):
     )
 
     feature_name = Column(String(50))
-    drift_score = Column(Numeric(15, 2))
+    # 4 decimals so the stored PSI matches what is computed and displayed
+    # (was Numeric(15, 2), which truncated e.g. 0.2449 -> 0.24).
+    drift_score = Column(Numeric(15, 4))
     drift_status = Column(String(50))
     checked_at = Column(DateTime)
     report_time = Column(DateTime)
